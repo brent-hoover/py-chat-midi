@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>py-chat-midi</title>
+    <link rel="stylesheet" href="https://unpkg.com/oat-css@latest/dist/oat.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://unpkg.com/oat-css@latest/dist/oat.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+    <script src="/static/app.js"></script>
+</head>
+<body>
+    <main x-data="sequencer()">
+        <!-- Transport Bar -->
+        <div class="transport-bar">
+            <div class="transport-controls">
+                <button @click="sendCommand(playing ? 'stop' : 'play')"
+                        :class="playing ? 'btn-stop' : 'btn-play'">
+                    <span x-text="playing ? '&#9632; Stop' : '&#9654; Play'"></span>
+                </button>
+            </div>
+            <div class="transport-session">
+                <button class="btn-session" @click="saveSession()">Save</button>
+                <button class="btn-session" @click="$refs.loadFile.click()">Load</button>
+                <input type="file" accept=".json" x-ref="loadFile" hidden
+                       @change="loadSession($event)">
+            </div>
+            <button class="btn-session" @click="showHelp = !showHelp">?</button>
+            <div class="transport-bpm">
+                <label>BPM</label>
+                <input type="number" min="20" max="300"
+                       :value="bpm"
+                       @change="sendCommand('bpm ' + $event.target.value)">
+            </div>
+        </div>
+
+        <!-- Cheatsheet -->
+        <div class="cheatsheet" x-show="showHelp" x-transition>
+            <div class="cheatsheet-cols">
+                <div class="cheatsheet-col">
+                    <h3>Transport</h3>
+                    <pre>play                start playback
+stop                stop playback
+bpm &lt;N&gt;             set tempo</pre>
+                    <h3>Patterns</h3>
+                    <pre>new &lt;name&gt; [steps] [ch]   create pattern
+list                      show all patterns
+delete &lt;name&gt;             remove pattern
+mute &lt;name&gt;               toggle mute</pre>
+                    <h3>Editing</h3>
+                    <pre>put &lt;pat&gt; &lt;steps&gt; &lt;notes&gt; [vel] [gate]
+clear &lt;pat&gt; [steps]
+show &lt;pat&gt;</pre>
+                </div>
+                <div class="cheatsheet-col">
+                    <h3>Generators</h3>
+                    <pre>euclid &lt;pat&gt; &lt;hits&gt; [notes] [vel]
+arp &lt;pat&gt; &lt;notes&gt; &lt;up|down|updown|random&gt;</pre>
+                    <h3>MIDI</h3>
+                    <pre>cc &lt;ch&gt; &lt;cc#&gt; &lt;val&gt;   control change
+pc &lt;ch&gt; &lt;program&gt;     program change
+panic                 all notes off</pre>
+                    <h3>Files</h3>
+                    <pre>save [file]           save session JSON
+load &lt;file&gt;           load session JSON
+run &lt;file.txt&gt;        run command script</pre>
+                    <h3>Steps</h3>
+                    <pre>0,4,8,12    individual
+0-15        range
+0-15:2      range with stride</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- All Pattern Grids -->
+        <div class="patterns-container">
+            <div class="pattern-hint" x-show="patternNames.length === 0">
+                No patterns yet. Use a command to create one.
+            </div>
+
+            <template x-for="name in patternNames" :key="name">
+                <div class="pattern-section">
+                    <div class="pattern-header" @click="togglePattern(name)">
+                        <span class="collapse-icon" x-text="isCollapsed(name) ? '&#9654;' : '&#9660;'"></span>
+                        <span class="pattern-name" x-text="name"></span>
+                        <span class="pattern-info"
+                              x-text="'ch=' + patterns[name].channel + ' &middot; ' + patterns[name].steps + ' steps'"></span>
+                        <span class="pattern-muted" x-show="patterns[name].muted">[MUTED]</span>
+                    </div>
+                    <div class="grid-container" x-show="!isCollapsed(name)">
+                        <div class="grid-scroll">
+                            <table class="pattern-grid">
+                                <thead>
+                                    <tr>
+                                        <th class="note-label-header"></th>
+                                        <template x-for="step in patterns[name].steps" :key="step">
+                                            <th class="step-header"
+                                                :class="{
+                                                    'playhead': playing && currentStep === (step - 1),
+                                                    'beat': (step - 1) % 4 === 0
+                                                }"
+                                                x-text="step - 1"></th>
+                                        </template>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template x-for="note in getGridNotes(patterns[name])" :key="note">
+                                        <tr>
+                                            <td class="note-label" x-text="noteLabelFor(note, patterns[name].channel)"></td>
+                                            <template x-for="step in patterns[name].steps" :key="step">
+                                                <td class="grid-cell"
+                                                    :class="{
+                                                        'filled': hasNoteIn(patterns[name], step - 1, note),
+                                                        'playhead': playing && currentStep === (step - 1),
+                                                        'beat': (step - 1) % 4 === 0
+                                                    }">
+                                                    <span class="cell-dot"
+                                                          x-text="hasNoteIn(patterns[name], step - 1, note) ? '\u25A0' : '\u00B7'"></span>
+                                                </td>
+                                            </template>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="grid-empty" x-show="getGridNotes(patterns[name]).length === 0">
+                            Pattern is empty. Add notes with <code>put</code> commands.
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Command Log -->
+        <div class="log-container" x-ref="logContainer">
+            <template x-for="(entry, i) in log" :key="i">
+                <div class="log-entry" x-text="entry"></div>
+            </template>
+            <div class="log-empty" x-show="log.length === 0">
+                Command output will appear here.
+            </div>
+        </div>
+
+        <!-- Dual Input -->
+        <div class="input-row">
+            <form class="input-group" @submit.prevent="sendCommand(commandInput)">
+                <span class="input-icon">&#9834;</span>
+                <input type="text" x-model="commandInput"
+                       placeholder="direct command..."
+                       autocomplete="off"
+                       @keydown="handleCommandKeydown($event)">
+            </form>
+            <form class="input-group" @submit.prevent="sendAI(aiInput)">
+                <span class="input-icon">&#129302;</span>
+                <input type="text" x-model="aiInput"
+                       placeholder="describe what you want..."
+                       :disabled="aiLoading"
+                       autocomplete="off">
+                <span class="ai-spinner" x-show="aiLoading">...</span>
+            </form>
+        </div>
+    </main>
+</body>
+</html>

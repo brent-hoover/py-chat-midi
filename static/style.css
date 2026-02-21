@@ -1,0 +1,467 @@
+/* ── Custom Properties ─────────────────────────────────── */
+:root {
+    --grid-cell-size: 30px;
+    --accent: #7c5cbf;
+    --accent-dim: rgba(124, 92, 191, 0.15);
+    --filled: #c084fc;
+    --filled-glow: rgba(192, 132, 252, 0.25);
+    --empty: #333;
+    --empty-dot: #555;
+    --playhead-bg: rgba(250, 204, 21, 0.18);
+    --playhead-border: rgba(250, 204, 21, 0.5);
+    --beat-bg: rgba(255, 255, 255, 0.03);
+    --log-bg: #111;
+    --transport-bg: #1a1a2e;
+}
+
+/* ── Global ───────────────────────────────────────────── */
+body {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    background: #0d0d14;
+    color: #e0e0e0;
+}
+
+main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-height: 100vh;
+}
+
+/* ── Transport Bar ────────────────────────────────────── */
+.transport-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.6rem 1rem;
+    background: var(--transport-bg);
+    border-radius: 8px;
+    border: 1px solid #2a2a3e;
+}
+
+.transport-controls {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.transport-controls button {
+    padding: 0.4rem 1.2rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: background 0.15s;
+}
+
+.btn-play {
+    background: #22c55e;
+    color: #000;
+}
+.btn-play:hover {
+    background: #16a34a;
+}
+
+.btn-stop {
+    background: #ef4444;
+    color: #fff;
+}
+.btn-stop:hover {
+    background: #dc2626;
+}
+
+.transport-session {
+    display: flex;
+    gap: 0.3rem;
+}
+
+.btn-session {
+    padding: 0.3rem 0.8rem;
+    background: #2a2a3e;
+    border: 1px solid #3a3a50;
+    border-radius: 4px;
+    color: #aaa;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.15s;
+}
+
+.btn-session:hover {
+    background: #3a3a50;
+    color: #ddd;
+}
+
+.transport-bpm {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+.transport-bpm label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.6;
+}
+
+.transport-bpm input {
+    width: 5rem;
+    padding: 0.3rem 0.5rem;
+    background: #0d0d14;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: inherit;
+    font-size: 0.95rem;
+    text-align: center;
+    font-family: monospace;
+}
+
+/* ── Pattern Sections ─────────────────────────────────── */
+.patterns-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.pattern-section {
+    display: flex;
+    flex-direction: column;
+}
+
+.pattern-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.7rem;
+    background: #1a1a2e;
+    border: 1px solid #2a2a3e;
+    border-radius: 6px 6px 0 0;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+
+.pattern-header:hover {
+    background: #252540;
+}
+
+.collapse-icon {
+    font-size: 0.65rem;
+    color: #777;
+    width: 1rem;
+    text-align: center;
+}
+
+.pattern-name {
+    font-family: monospace;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--filled);
+}
+
+.pattern-info {
+    font-family: monospace;
+    font-size: 0.75rem;
+    color: #666;
+}
+
+.pattern-muted {
+    font-family: monospace;
+    font-size: 0.7rem;
+    color: #ef4444;
+    margin-left: auto;
+}
+
+.pattern-hint {
+    font-size: 0.8rem;
+    opacity: 0.4;
+    padding: 0.3rem 0;
+}
+
+.pattern-section .grid-container {
+    border-radius: 0 0 8px 8px;
+    border-top: none;
+}
+
+/* ── Pattern Grid ─────────────────────────────────────── */
+.grid-container {
+    background: #111118;
+    border: 1px solid #2a2a3e;
+    border-radius: 8px;
+    padding: 0.5rem;
+}
+
+.grid-scroll {
+    overflow-x: auto;
+    overflow-y: visible;
+}
+
+.pattern-grid {
+    border-collapse: separate;
+    border-spacing: 2px;
+    width: max-content;
+}
+
+.pattern-grid th,
+.pattern-grid td {
+    padding: 0;
+    text-align: center;
+}
+
+.note-label-header {
+    width: 70px;
+    min-width: 70px;
+}
+
+.step-header {
+    width: var(--grid-cell-size);
+    min-width: var(--grid-cell-size);
+    font-size: 0.65rem;
+    font-family: monospace;
+    color: #555;
+    padding-bottom: 4px !important;
+}
+
+.step-header.beat {
+    color: #888;
+}
+
+.step-header.playhead {
+    color: #facc15;
+    font-weight: 700;
+}
+
+.note-label {
+    font-family: monospace;
+    font-size: 0.75rem;
+    text-align: right;
+    padding-right: 8px !important;
+    color: #999;
+    white-space: nowrap;
+    width: 70px;
+    min-width: 70px;
+}
+
+.grid-cell {
+    width: var(--grid-cell-size);
+    height: var(--grid-cell-size);
+    min-width: var(--grid-cell-size);
+    background: var(--empty);
+    border-radius: 3px;
+    cursor: default;
+    transition: background 0.1s;
+    position: relative;
+}
+
+.grid-cell.beat {
+    background: #383838;
+}
+
+.grid-cell.filled {
+    background: var(--filled);
+    box-shadow: 0 0 6px var(--filled-glow);
+}
+
+.grid-cell.playhead {
+    background: var(--playhead-bg);
+    outline: 1px solid var(--playhead-border);
+    outline-offset: -1px;
+}
+
+.grid-cell.playhead.filled {
+    background: #facc15;
+    box-shadow: 0 0 10px rgba(250, 204, 21, 0.4);
+}
+
+.cell-dot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    font-size: 0.9rem;
+    line-height: 1;
+    color: #222;
+}
+
+.grid-cell.filled .cell-dot {
+    color: #1a1a2e;
+    font-weight: 700;
+}
+
+.grid-cell:not(.filled) .cell-dot {
+    color: var(--empty-dot);
+    font-size: 0.7rem;
+}
+
+.grid-empty {
+    text-align: center;
+    padding: 1.5rem;
+    font-size: 0.85rem;
+    opacity: 0.4;
+}
+
+.grid-empty code {
+    background: #222;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+}
+
+/* ── Command Log ──────────────────────────────────────── */
+.log-container {
+    background: var(--log-bg);
+    border: 1px solid #2a2a3e;
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+    max-height: 180px;
+    min-height: 60px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    flex-shrink: 0;
+}
+
+.log-entry {
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: #e0e0e0;
+}
+
+.log-empty {
+    opacity: 0.3;
+    font-style: italic;
+}
+
+/* ── Dual Input ───────────────────────────────────────── */
+.input-row {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.input-group {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: #1a1a2e;
+    border: 1px solid #2a2a3e;
+    border-radius: 8px;
+    padding: 0.4rem 0.7rem;
+    transition: border-color 0.15s;
+}
+
+.input-group:focus-within {
+    border-color: var(--accent);
+}
+
+.input-icon {
+    font-size: 1rem;
+    opacity: 0.5;
+    flex-shrink: 0;
+}
+
+.input-group input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #e0e0e0;
+    font-family: monospace;
+    font-size: 0.85rem;
+    padding: 0.3rem 0;
+}
+
+.input-group input::placeholder {
+    color: #555;
+}
+
+.ai-spinner {
+    animation: pulse 0.8s infinite;
+    opacity: 0.6;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.8; }
+}
+
+/* ── Scrollbar ────────────────────────────────────────── */
+.log-container::-webkit-scrollbar,
+.grid-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.log-container::-webkit-scrollbar-track,
+.grid-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.log-container::-webkit-scrollbar-thumb,
+.grid-scroll::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 3px;
+}
+
+.log-container::-webkit-scrollbar-thumb:hover,
+.grid-scroll::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* ── Cheatsheet ──────────────────────────────────────── */
+.cheatsheet {
+    background: #1a1a2e;
+    border: 1px solid #2a2a3e;
+    border-radius: 8px;
+    padding: 0.8rem 1rem;
+}
+
+.cheatsheet-cols {
+    display: flex;
+    gap: 2rem;
+}
+
+.cheatsheet-col {
+    flex: 1;
+    min-width: 0;
+}
+
+.cheatsheet h3 {
+    font-family: monospace;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--filled);
+    margin: 0.6rem 0 0.2rem;
+}
+
+.cheatsheet h3:first-child {
+    margin-top: 0;
+}
+
+.cheatsheet pre {
+    font-family: monospace;
+    font-size: 0.75rem;
+    line-height: 1.6;
+    color: #bbb;
+    margin: 0;
+    white-space: pre-wrap;
+}
+
+/* ── Responsive ───────────────────────────────────────── */
+@media (max-width: 600px) {
+    .input-row {
+        flex-direction: column;
+    }
+
+    .transport-bar {
+        flex-wrap: wrap;
+    }
+}

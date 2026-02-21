@@ -1,0 +1,10 @@
+bpm 128
+new drums 16 9
+put drums 0,4,8,12 kick
+put drums 2,6,10,14 snare
+put drums 0-15 hihat 60
+new bass 16 0
+put bass 0,8 C2
+put bass 4 D#2
+put bass 12 G1
+play
