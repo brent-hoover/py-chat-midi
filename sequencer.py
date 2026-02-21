@@ -83,6 +83,9 @@ class Pattern:
         # Each step: list of (note, velocity, gate_steps)
         self.data: dict[int, list[tuple[int, int, int]]] = defaultdict(list)
         self.muted = False
+        self.muted_notes: set[int] = set()
+        self.swing = 0  # 0-100, applies to whole pattern
+        self.swing_notes: dict[int, int] = {}  # note -> swing%, overrides pattern swing
 
     def set_step(self, step: int, note: int, velocity: int = 100, gate: int = 1):
         step = step % self.steps
@@ -101,6 +104,9 @@ class Pattern:
             'steps': self.steps,
             'channel': self.channel,
             'muted': self.muted,
+            'muted_notes': list(self.muted_notes),
+            'swing': self.swing,
+            'swing_notes': {str(k): v for k, v in self.swing_notes.items()},
             'data': {str(k): v for k, v in self.data.items()},
         }
 
@@ -108,6 +114,9 @@ class Pattern:
     def from_dict(cls, d: dict) -> 'Pattern':
         pat = cls(d['name'], d['steps'], d['channel'])
         pat.muted = d.get('muted', False)
+        pat.muted_notes = set(d.get('muted_notes', []))
+        pat.swing = d.get('swing', 0)
+        pat.swing_notes = {int(k): v for k, v in d.get('swing_notes', {}).items()}
         for step_str, notes in d['data'].items():
             pat.data[int(step_str)] = [tuple(n) for n in notes]
         return pat
@@ -132,7 +141,7 @@ class Sequencer:
         try:
             self.port = mido.open_output(port_name, virtual=True)
             print(f"✓ Virtual MIDI port '{port_name}' created.")
-            print(f"  → In Reason: set MIDI input to '{port_name}'")
+            print(f"  → In your Synth software : set MIDI input to '{port_name}'")
         except Exception:
             # Fallback: try to find an existing port (Windows with loopMIDI)
             available = mido.get_output_names()
@@ -168,6 +177,26 @@ class Sequencer:
     def _send(self, msg):
         self.port.send(msg)
 
+    def _fire_notes(self, pat, step_notes, now):
+        """Send note_on for a pattern's step notes, skipping muted notes."""
+        fired = []
+        for note, vel, gate in step_notes:
+            if note in pat.muted_notes:
+                continue
+            msg = mido.Message(
+                'note_on', note=note, channel=pat.channel, velocity=vel
+            )
+            self._send(msg)
+            off_time = now + self.step_duration * gate * 0.9
+            self.active_notes.append((note, pat.channel, off_time))
+            fired.append({"note": note, "vel": vel, "ch": pat.channel})
+        if fired:
+            self._notify({
+                "type": "midi_out",
+                "pattern": pat.name,
+                "notes": fired,
+            })
+
     def _all_notes_off(self):
         # Send note_off for every active note individually
         for note, ch, _off_time in self.active_notes:
@@ -202,16 +231,33 @@ class Sequencer:
                 break
 
             # Fire current step across all patterns
+            is_odd_step = self.current_step % 2 == 1
             for pat in self.patterns.values():
                 if pat.muted:
                     continue
-                for note, vel, gate in pat.data.get(self.current_step % pat.steps, []):
-                    msg = mido.Message(
-                        'note_on', note=note, channel=pat.channel, velocity=vel
-                    )
-                    self._send(msg)
-                    off_time = now + self.step_duration * gate * 0.9
-                    self.active_notes.append((note, pat.channel, off_time))
+                step_notes = pat.data.get(self.current_step % pat.steps, [])
+                if not step_notes:
+                    continue
+                if not is_odd_step:
+                    self._fire_notes(pat, step_notes, now)
+                else:
+                    # Group notes by their swing amount
+                    straight = []
+                    by_swing: dict[int, list] = {}
+                    for entry in step_notes:
+                        note = entry[0]
+                        sw = pat.swing_notes.get(note, pat.swing)
+                        if sw == 0:
+                            straight.append(entry)
+                        else:
+                            by_swing.setdefault(sw, []).append(entry)
+                    if straight:
+                        self._fire_notes(pat, straight, now)
+                    for sw_val, notes in by_swing.items():
+                        delay = self.step_duration * (sw_val / 100) * 0.5
+                        threading.Timer(
+                            delay, self._fire_notes, args=(pat, notes, now + delay)
+                        ).start()
 
             self.current_step += 1
             self._notify({"type": "playhead", "step": self.current_step - 1})
@@ -523,6 +569,33 @@ class ChatInterface:
                 self.seq.bpm = float(args)
                 self._emit(f"  BPM → {self.seq.bpm}")
 
+            elif cmd == 'swing':
+                parts = args.split()
+                if len(parts) < 2:
+                    self._emit("Usage: swing <pattern> <0-100> [note]")
+                    return True, self._output
+                pat_name = parts[0]
+                if pat_name not in self.seq.patterns:
+                    self._emit(f"  Pattern '{pat_name}' not found")
+                    return True, self._output
+                pat = self.seq.patterns[pat_name]
+                val = max(0, min(100, int(parts[1])))
+                if len(parts) >= 3:
+                    note = parse_note_list(parts[2])[0]
+                    if val == 0:
+                        pat.swing_notes.pop(note, None)
+                        self._emit(
+                            f"  ✓ {midi_to_note_name(note)} in '{pat_name}' → no swing"
+                        )
+                    else:
+                        pat.swing_notes[note] = val
+                        self._emit(
+                            f"  ✓ {midi_to_note_name(note)} in '{pat_name}' swing → {val}%"
+                        )
+                else:
+                    pat.swing = val
+                    self._emit(f"  ✓ '{pat_name}' swing → {val}%")
+
             elif cmd == 'new':
                 parts = args.split()
                 name = parts[0]
@@ -545,16 +618,117 @@ class ChatInterface:
                 else:
                     self._emit(f"  Pattern '{args}' not found")
 
-            elif cmd == 'mute':
-                if args in self.seq.patterns:
-                    self.seq.patterns[args].muted = not self.seq.patterns[args].muted
-                    state = "muted" if self.seq.patterns[args].muted else "unmuted"
-                    self._emit(f"  ✓ '{args}' {state}")
+            elif cmd == 'unmute':
+                if args == 'all' or not args:
+                    for p in self.seq.patterns.values():
+                        p.muted = False
+                        p.muted_notes.clear()
+                    self._emit("  ✓ All patterns and notes unmuted")
+                elif args in self.seq.patterns:
+                    pat = self.seq.patterns[args]
+                    pat.muted = False
+                    pat.muted_notes.clear()
+                    self._emit(f"  ✓ '{args}' fully unmuted")
                 else:
                     self._emit(f"  Pattern '{args}' not found")
 
+            elif cmd == 'mute':
+                parts = args.split(None, 1)
+                pat_name = parts[0]
+                if pat_name not in self.seq.patterns:
+                    self._emit(f"  Pattern '{pat_name}' not found")
+                    return True, self._output
+                pat = self.seq.patterns[pat_name]
+                if len(parts) == 1:
+                    pat.muted = not pat.muted
+                    state = "muted" if pat.muted else "unmuted"
+                    self._emit(f"  ✓ '{pat_name}' {state}")
+                else:
+                    note = parse_note_list(parts[1])[0]
+                    if note in pat.muted_notes:
+                        pat.muted_notes.discard(note)
+                        self._emit(f"  ✓ Unmuted {midi_to_note_name(note)} in '{pat_name}'")
+                    else:
+                        pat.muted_notes.add(note)
+                        self._emit(f"  ✓ Muted {midi_to_note_name(note)} in '{pat_name}'")
+
+            elif cmd == 'solo':
+                parts = args.split(None, 1)
+                pat_name = parts[0]
+                if pat_name not in self.seq.patterns:
+                    self._emit(f"  Pattern '{pat_name}' not found")
+                    return True, self._output
+                pat = self.seq.patterns[pat_name]
+                if len(parts) == 1:
+                    # Solo pattern: mute all others, unmute this one
+                    already_solo = all(
+                        p.muted for n, p in self.seq.patterns.items() if n != pat_name
+                    ) and not pat.muted
+                    if already_solo:
+                        for p in self.seq.patterns.values():
+                            p.muted = False
+                        self._emit(f"  ✓ Unsolo'd — all patterns unmuted")
+                    else:
+                        for n, p in self.seq.patterns.items():
+                            p.muted = n != pat_name
+                        self._emit(f"  ✓ Solo '{pat_name}'")
+                else:
+                    # Solo note: mute all other notes in pattern
+                    note = parse_note_list(parts[1])[0]
+                    all_notes = set()
+                    for step_notes in pat.data.values():
+                        for n, _v, _g in step_notes:
+                            all_notes.add(n)
+                    if pat.muted_notes == all_notes - {note}:
+                        pat.muted_notes.clear()
+                        self._emit(f"  ✓ Unsolo'd {midi_to_note_name(note)} in '{pat_name}'")
+                    else:
+                        pat.muted_notes = all_notes - {note}
+                        self._emit(f"  ✓ Solo {midi_to_note_name(note)} in '{pat_name}'")
+
             elif cmd == 'put':
                 self.cmd_put(args)
+
+            elif cmd == 'vel':
+                parts = args.split(None, 3)
+                if len(parts) < 4:
+                    self._emit("Usage: vel <pattern> <steps> <note> <velocity>")
+                    return True, self._output
+                pat_name, step_str, note_str, vel_str = parts
+                if pat_name not in self.seq.patterns:
+                    self._emit(f"  Pattern '{pat_name}' not found")
+                    return True, self._output
+                pat = self.seq.patterns[pat_name]
+                steps = self.parse_steps(step_str, pat.steps)
+                note = parse_note_list(note_str)[0]
+                new_vel = int(vel_str)
+                count = 0
+                for s in steps:
+                    pat.data[s] = [
+                        (n, new_vel if n == note else v, g)
+                        for n, v, g in pat.data.get(s, [])
+                    ]
+                    count += sum(1 for n, _v, _g in pat.data[s] if n == note)
+                self._emit(f"  ✓ Set velocity {new_vel} on {count} hit(s)")
+
+            elif cmd == 'remove':
+                parts = args.split(None, 2)
+                if len(parts) < 3:
+                    self._emit("Usage: remove <pattern> <steps> <note>")
+                    return True, self._output
+                pat_name, step_str, note_str = parts
+                if pat_name not in self.seq.patterns:
+                    self._emit(f"  Pattern '{pat_name}' not found")
+                    return True, self._output
+                pat = self.seq.patterns[pat_name]
+                steps = self.parse_steps(step_str, pat.steps)
+                note = parse_note_list(note_str)[0]
+                count = 0
+                for s in steps:
+                    before = len(pat.data.get(s, []))
+                    pat.data[s] = [(n, v, g) for n, v, g in pat.data.get(s, []) if n != note]
+                    count += before - len(pat.data[s])
+                self._emit(f"  ✓ Removed {count} hit(s)")
 
             elif cmd == 'clear':
                 parts = args.split()
@@ -570,6 +744,30 @@ class ChatInterface:
                 else:
                     self.seq.patterns[pat_name].clear()
                     self._emit(f"  ✓ Cleared all of '{pat_name}'")
+
+            elif cmd == 'replace':
+                parts = args.split()
+                if len(parts) < 3:
+                    self._emit("Usage: replace <pattern> <old_note> <new_note>")
+                    return True, self._output
+                pat_name, old_str, new_str = parts[0], parts[1], parts[2]
+                if pat_name not in self.seq.patterns:
+                    self._emit(f"  Pattern '{pat_name}' not found")
+                    return True, self._output
+                old_note = parse_note_list(old_str)[0]
+                new_note = parse_note_list(new_str)[0]
+                pat = self.seq.patterns[pat_name]
+                count = 0
+                for step in list(pat.data.keys()):
+                    new_entries = []
+                    for n, v, g in pat.data[step]:
+                        if n == old_note:
+                            new_entries.append((new_note, v, g))
+                            count += 1
+                        else:
+                            new_entries.append((n, v, g))
+                    pat.data[step] = new_entries
+                self._emit(f"  ✓ Replaced {count} occurrence(s) in '{pat_name}'")
 
             elif cmd == 'show':
                 self.cmd_show(args)
@@ -605,6 +803,35 @@ class ChatInterface:
                 self._emit("  Drum aliases:")
                 for name, note in sorted(DRUM_MAP.items(), key=lambda x: x[1]):
                     self._emit(f"    {name:10s} → {note} ({midi_to_note_name(note)})")
+
+            elif cmd == 'drummap':
+                parts = args.split()
+                if len(parts) == 0:
+                    self._emit("Usage: drummap <name> <note>  or  drummap reset")
+                    return True, self._output
+                if parts[0] == 'reset':
+                    DRUM_MAP.clear()
+                    DRUM_MAP.update({
+                        'kick': 36, 'snare': 38, 'clap': 39, 'hihat': 42,
+                        'ohh': 46, 'tom1': 48, 'tom2': 45, 'tom3': 43,
+                        'crash': 49, 'ride': 51, 'cowbell': 56, 'rimshot': 37,
+                    })
+                    self._emit("  ✓ Drum map reset to GM defaults")
+                elif len(parts) == 1:
+                    name = parts[0].lower()
+                    if name in DRUM_MAP:
+                        self._emit(f"  {name} → {DRUM_MAP[name]} ({midi_to_note_name(DRUM_MAP[name])})")
+                    else:
+                        self._emit(f"  '{name}' not in drum map")
+                elif len(parts) >= 2:
+                    name = parts[0].lower()
+                    try:
+                        note = int(parts[1]) if parts[1].isdigit() else note_name_to_midi(parts[1])
+                    except ValueError as e:
+                        self._emit(f"  Error: {e}")
+                        return True, self._output
+                    DRUM_MAP[name] = note
+                    self._emit(f"  ✓ {name} → {note} ({midi_to_note_name(note)})")
 
             elif cmd == 'save':
                 filepath = args if args else 'session.json'

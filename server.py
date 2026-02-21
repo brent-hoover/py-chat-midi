@@ -2,6 +2,7 @@ import asyncio
 import atexit
 import json
 import os
+import sys
 from pathlib import Path
 
 import anthropic
@@ -10,7 +11,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from sequencer import ChatInterface
+from sequencer import ChatInterface, Pattern
+
+AUTOSAVE_PATH = Path(__file__).parent / ".autosave.json"
 
 app = FastAPI()
 chat = ChatInterface()
@@ -19,8 +22,42 @@ chat = ChatInterface()
 clients: set[WebSocket] = set()
 
 
+def _autosave():
+    """Persist current state so it survives reloads."""
+    try:
+        data = {
+            "bpm": chat.seq.bpm,
+            "steps_per_beat": chat.seq.steps_per_beat,
+            "patterns": {name: pat.to_dict() for name, pat in chat.seq.patterns.items()},
+        }
+        AUTOSAVE_PATH.write_text(json.dumps(data))
+    except Exception:
+        pass
+
+
+def _autoload():
+    """Restore state from autosave if it exists."""
+    if not AUTOSAVE_PATH.exists():
+        return
+    try:
+        data = json.loads(AUTOSAVE_PATH.read_text())
+        chat.seq.bpm = data["bpm"]
+        chat.seq.steps_per_beat = data.get("steps_per_beat", 4)
+        chat.seq.patterns.clear()
+        for name, pat_dict in data["patterns"].items():
+            chat.seq.patterns[name] = Pattern.from_dict(pat_dict)
+        n = len(chat.seq.patterns)
+        print(f"  ✓ Restored {n} pattern(s) from autosave ({chat.seq.bpm} BPM)")
+    except Exception:
+        pass
+
+
+_autoload()
+
+
 def _shutdown():
-    """Ensure MIDI notes stop and port closes on exit."""
+    """Autosave state, stop MIDI, close port."""
+    _autosave()
     chat.seq.close()
 
 
@@ -40,13 +77,19 @@ async def broadcast(message: dict):
     clients -= disconnected
 
 
+_loop = None
+
+
+@app.on_event("startup")
+async def _capture_loop():
+    global _loop
+    _loop = asyncio.get_running_loop()
+
+
 def on_sequencer_event(event: dict):
     """Bridge sync sequencer callbacks to async broadcast."""
-    try:
-        loop = asyncio.get_running_loop()
-        loop.call_soon_threadsafe(asyncio.ensure_future, broadcast(event))
-    except RuntimeError:
-        pass
+    if _loop is not None:
+        asyncio.run_coroutine_threadsafe(broadcast(event), _loop)
 
 
 chat.seq.add_listener(on_sequencer_event)
@@ -152,8 +195,9 @@ async def load_session(req: dict):
     return {"message": f"Loaded {n_pat} patterns, {chat.seq.bpm} BPM"}
 
 
-# Serve static files
-static_dir = Path(__file__).parent / "static"
+# Serve static files — resolve path for both dev and PyInstaller bundle
+_base = Path(getattr(sys, '_MEIPASS', Path(__file__).parent))
+static_dir = _base / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 

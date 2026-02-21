@@ -97,7 +97,7 @@ run &lt;file.txt&gt;        run command script</pre>
                                         <template x-for="step in patterns[name].steps" :key="step">
                                             <th class="step-header"
                                                 :class="{
-                                                    'playhead': playing && currentStep === (step - 1),
+                                                    'playhead': playing && (currentStep % patterns[name].steps) === (step - 1),
                                                     'beat': (step - 1) % 4 === 0
                                                 }"
                                                 x-text="step - 1"></th>
@@ -112,7 +112,7 @@ run &lt;file.txt&gt;        run command script</pre>
                                                 <td class="grid-cell"
                                                     :class="{
                                                         'filled': hasNoteIn(patterns[name], step - 1, note),
-                                                        'playhead': playing && currentStep === (step - 1),
+                                                        'playhead': playing && (currentStep % patterns[name].steps) === (step - 1),
                                                         'beat': (step - 1) % 4 === 0
                                                     }">
                                                     <span class="cell-dot"
@@ -132,6 +132,22 @@ run &lt;file.txt&gt;        run command script</pre>
             </template>
         </div>
 
+        <!-- MIDI Piano Roll Monitor -->
+        <div class="midi-monitor">
+            <div class="midi-monitor-header" @click="toggleMidiMonitor()">
+                <span class="collapse-icon" x-text="showMidi ? '&#9660;' : '&#9654;'"></span>
+                <span class="midi-monitor-title">MIDI Output</span>
+                <span class="midi-monitor-hint" x-show="!showMidi">click to monitor</span>
+            </div>
+            <div class="piano-roll-wrap" x-show="showMidi">
+                <div class="piano-roll-top">
+                    <div class="piano-roll-corner"></div>
+                    <div class="piano-roll-labels" x-ref="pianoLabels"></div>
+                </div>
+                <canvas x-ref="pianoRoll" class="piano-roll-canvas"></canvas>
+            </div>
+        </div>
+
         <!-- Command Log -->
         <div class="log-container" x-ref="logContainer">
             <template x-for="(entry, i) in log" :key="i">
@@ -141,6 +157,9 @@ run &lt;file.txt&gt;        run command script</pre>
                 Command output will appear here.
             </div>
         </div>
+
+        <!-- Command Hint -->
+        <div class="command-hint" x-show="commandHint" x-text="commandHint"></div>
 
         <!-- Dual Input -->
         <div class="input-row">

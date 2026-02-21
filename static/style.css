@@ -313,6 +313,82 @@ main {
     border-radius: 3px;
 }
 
+/* ── MIDI Monitor ────────────────────────────────────── */
+.midi-monitor {
+    background: #111118;
+    border: 1px solid #2a2a3e;
+    border-radius: 8px;
+}
+
+.midi-monitor-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.7rem;
+    cursor: pointer;
+    user-select: none;
+}
+
+.midi-monitor-header:hover {
+    background: #1a1a2e;
+    border-radius: 8px;
+}
+
+.midi-monitor-title {
+    font-family: monospace;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #4ade80;
+}
+
+.midi-monitor-hint {
+    font-family: monospace;
+    font-size: 0.7rem;
+    color: #555;
+}
+
+.piano-roll-wrap {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid #2a2a3e;
+    padding: 0.3rem;
+    max-height: 250px;
+    overflow: hidden;
+}
+
+.piano-roll-top {
+    display: flex;
+    flex-shrink: 0;
+}
+
+.piano-roll-corner {
+    width: 28px;
+    flex-shrink: 0;
+}
+
+.piano-roll-labels {
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+    font-family: monospace;
+    font-size: 0.6rem;
+    color: #777;
+    overflow: hidden;
+}
+
+.piano-roll-label {
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.piano-roll-canvas {
+    flex: 1;
+    width: 100%;
+    min-height: 180px;
+    border-radius: 3px;
+}
+
 /* ── Command Log ──────────────────────────────────────── */
 .log-container {
     background: var(--log-bg);
@@ -343,6 +419,14 @@ main {
 .input-row {
     display: flex;
     gap: 0.5rem;
+}
+
+.command-hint {
+    font-family: monospace;
+    font-size: 0.75rem;
+    color: #666;
+    padding: 0.15rem 0.7rem;
+    min-height: 1.2em;
 }
 
 .input-group {
