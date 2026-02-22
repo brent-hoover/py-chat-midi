@@ -382,6 +382,24 @@ class TestNoteEditing:
         has_notes = any(pat.data.get(s, []) for s in range(16))
         assert not has_notes
 
+    def test_clear_note_from_steps(self, chat):
+        run(chat, "new beat 16 9")
+        run(chat, "put beat 0,4 kick 100")
+        run(chat, "put beat 0,4 hihat 80")
+        run(chat, "clear beat 0,4 kick")
+        pat = chat.seq.patterns["beat"]
+        # kick removed, hihat remains
+        for s in [0, 4]:
+            notes = [n for n, v, g in pat.data.get(s, [])]
+            assert 36 not in notes  # kick gone
+            assert 42 in notes  # hihat stays
+
+    def test_clear_note_reports_count(self, chat):
+        run(chat, "new beat 16 9")
+        run(chat, "put beat 0,4,8 kick 100")
+        out = run(chat, "clear beat 0,4,8 kick")
+        assert any("3" in line and "✓" in line for line in out)
+
     def test_remove_specific_note(self, chat):
         run(chat, "new beat 16 9")
         run(chat, "put beat 0-3 kick 100")
@@ -453,6 +471,58 @@ class TestVolume:
         out = run(chat, "vol beat -10")
         assert any("✓" in line for line in out)
         assert chat.seq.patterns["beat"].data[0][0][1] == 90
+
+
+class TestTranspose:
+    def test_transpose_all_up(self, chat):
+        run(chat, "new bass 16 0")
+        run(chat, "put bass 0 C3 100")
+        run(chat, "put bass 4 E3 100")
+        run(chat, "transpose bass +7")
+        pat = chat.seq.patterns["bass"]
+        assert pat.data[0][0][0] == 55  # C3(48) + 7 = G3(55)
+        assert pat.data[4][0][0] == 59  # E3(52) + 7 = B3(59)
+
+    def test_transpose_all_down(self, chat):
+        run(chat, "new bass 16 0")
+        run(chat, "put bass 0 C4 100")
+        run(chat, "transpose bass -12")
+        pat = chat.seq.patterns["bass"]
+        assert pat.data[0][0][0] == 48  # C4(60) - 12 = C3(48)
+
+    def test_transpose_specific_note(self, chat):
+        run(chat, "new bass 16 0")
+        run(chat, "put bass 0 C3 100")
+        run(chat, "put bass 4 E3 100")
+        run(chat, "transpose bass C3 +2")
+        pat = chat.seq.patterns["bass"]
+        assert pat.data[0][0][0] == 50  # C3(48) + 2 = D3(50)
+        assert pat.data[4][0][0] == 52  # E3 unchanged
+
+    def test_transpose_clamp_high(self, chat):
+        run(chat, "new lead 16 0")
+        run(chat, "put lead 0 120 100")  # raw MIDI 120
+        run(chat, "transpose lead +20")
+        pat = chat.seq.patterns["lead"]
+        assert pat.data[0][0][0] == 127
+
+    def test_transpose_clamp_low(self, chat):
+        run(chat, "new lead 16 0")
+        run(chat, "put lead 0 5 100")  # raw MIDI 5
+        run(chat, "transpose lead -20")
+        pat = chat.seq.patterns["lead"]
+        assert pat.data[0][0][0] == 0
+
+    def test_tp_alias(self, chat):
+        run(chat, "new bass 16 0")
+        run(chat, "put bass 0 C3 100")
+        out = run(chat, "tp bass +5")
+        assert any("✓" in line for line in out)
+        assert chat.seq.patterns["bass"].data[0][0][0] == 53  # C3(48) + 5
+
+    def test_transpose_missing_pattern(self, chat):
+        out = run(chat, "transpose nope +5")
+        assert any("not found" in line for line in out)
 
 
 # ── Generators ───────────────────────────────────────────────────────────

@@ -723,19 +723,22 @@ Examples:
   arp bass C2,G2,C3,G3 updown      bass arpeggio ping-pong
   arp lead D3,F#3,A3,D4 random     random arp""",
     "clear": """\
-Clear all notes from a pattern, or just specific steps.
+Clear all notes from a pattern, specific steps, or a single note from steps.
 
-Usage: clear <pattern> [steps]
+Usage: clear <pattern> [steps] [note]
 
 Without steps: clears the entire pattern (all notes, all steps).
 With steps:    clears only the specified steps.
+With note:     removes only that note from the specified steps.
 
 Step syntax: same as put (0,4,8 / 0-15 / 0-15:2)
 
 Examples:
   clear drums             wipe entire drum pattern
   clear bass 0-3          clear first 4 steps of bass
-  clear keys 0,4,8        clear specific steps""",
+  clear keys 0,4,8        clear specific steps
+  clear drums 0-15 kick   remove kick from all steps
+  clear keys 0,4 E3       remove E3 from steps 0 and 4""",
     "new": """\
 Create a new pattern.
 
@@ -820,6 +823,18 @@ Examples:
   replace drums kick tom1      swap kick for tom1
   replace bass C3 D3           transpose C3 to D3
   replace drums hihat ohh      open hihat instead of closed""",
+    "transpose": """\
+Shift notes up or down by semitones.
+
+Usage: transpose <pattern> <+/-N>            shift all notes
+       transpose <pattern> <note> <+/-N>     shift only that note
+
+Values are clamped to the MIDI range 0-127.
+
+Examples:
+  transpose bass +7            all notes up a fifth
+  transpose keys -12           all notes down an octave
+  transpose bass C3 +2         only C3 notes become D3""",
     "auto": """\
 Set CC automation keyframes on a pattern.
 
@@ -1427,25 +1442,38 @@ class ChatInterface:
         "clear",
         "editing",
         "clear steps or entire pattern",
-        usage="clear <pat> [steps]",
-        hint_args=["<pattern>", "[steps]"],
+        usage="clear <pat> [steps] [note]",
+        hint_args=["<pattern>", "[steps]", "[note]"],
     )
     def cmd_clear(self, args: str):
         parts = args.split()
         if not parts:
-            self._emit("Usage: clear <pattern> [steps]")
+            self._emit("Usage: clear <pattern> [steps] [note]")
             return
         pat_name = parts[0]
         if pat_name not in self.seq.patterns:
             self._emit(f"  Pattern '{pat_name}' not found")
             return
-        if len(parts) > 1:
-            steps = self.parse_steps(parts[1], self.seq.patterns[pat_name].steps)
+        pat = self.seq.patterns[pat_name]
+        if len(parts) >= 3:
+            steps = self.parse_steps(parts[1], pat.steps)
+            note = self._parse_notes(parts[2])[0]
+            count = 0
             for s in steps:
-                self.seq.patterns[pat_name].clear_step(s)
+                before = len(pat.data.get(s, []))
+                pat.data[s] = [(n, v, g) for n, v, g in pat.data.get(s, []) if n != note]
+                count += before - len(pat.data[s])
+            self._emit(
+                f"  ✓ Cleared {count} {self._note_name(note)} hit(s)"
+                f" from '{pat_name}'"
+            )
+        elif len(parts) == 2:
+            steps = self.parse_steps(parts[1], pat.steps)
+            for s in steps:
+                pat.clear_step(s)
             self._emit(f"  ✓ Cleared steps {steps} in '{pat_name}'")
         else:
-            self.seq.patterns[pat_name].clear()
+            pat.clear()
             self._emit(f"  ✓ Cleared all of '{pat_name}'")
 
     @command(
@@ -1478,6 +1506,43 @@ class ChatInterface:
                     new_entries.append((n, v, g))
             pat.data[step] = new_entries
         self._emit(f"  ✓ Replaced {count} occurrence(s) in '{pat_name}'")
+
+    @command(
+        "transpose",
+        "editing",
+        "shift notes by semitones",
+        usage="transpose <pat> [note] <+/-N>",
+        hint_args=["<pattern>", "[note]", "<+/-N>"],
+        aliases=["tp"],
+    )
+    def cmd_transpose(self, args: str):
+        parts = args.split()
+        if len(parts) < 2:
+            self._emit("Usage: transpose <pattern> [note] <+/-N>")
+            return
+        pat_name = parts[0]
+        if pat_name not in self.seq.patterns:
+            self._emit(f"  Pattern '{pat_name}' not found")
+            return
+        pat = self.seq.patterns[pat_name]
+        if len(parts) == 3:
+            filter_note = self._parse_notes(parts[1])[0]
+            semitones = int(parts[2])
+        else:
+            filter_note = None
+            semitones = int(parts[1])
+        count = 0
+        for step in pat.data:
+            new_entries = []
+            for n, v, g in pat.data[step]:
+                if filter_note is None or n == filter_note:
+                    new_entries.append((max(0, min(127, n + semitones)), v, g))
+                    count += 1
+                else:
+                    new_entries.append((n, v, g))
+            pat.data[step] = new_entries
+        sign = "+" if semitones >= 0 else ""
+        self._emit(f"  ✓ Transposed {count} hit(s) in '{pat_name}' by {sign}{semitones}")
 
     @command("show", "editing", "visualize pattern", usage="show <pat>", hint_args=["<pattern>"])
     def cmd_show(self, args: str):
@@ -2487,6 +2552,7 @@ class ChatInterface:
             "swing",
             "auto",
             "replace",
+            "transpose",
             "mute",
             "unmute",
             "solo",
