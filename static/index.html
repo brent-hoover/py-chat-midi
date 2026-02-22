@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Syntax</title>
-    <link rel="stylesheet" href="https://unpkg.com/oat-css@latest/dist/oat.min.css">
-    <link rel="stylesheet" href="/static/style.css">
-    <script src="https://unpkg.com/oat-css@latest/dist/oat.min.js"></script>
+    <!-- <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css"> -->
+    <link rel="stylesheet" href="/static/style.css?v=5">
+    <!-- <script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script> -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=2"></script>
 </head>
 <body>
-    <main x-data="sequencer()" :style="'max-width:' + layoutWidth">
+    <main x-data="sequencer()">
         <!-- Transport Bar -->
         <div class="transport-bar">
             <div class="transport-controls">
@@ -164,69 +164,6 @@ run &lt;file.txt&gt;        run command script</pre>
                     <div class="detail-empty-hint">Create one with <code>new &lt;name&gt;</code></div>
                 </div>
 
-                <!-- MIDI Output Monitor -->
-                <div class="midi-monitor">
-                    <div class="midi-monitor-header" @click="toggleMidiMonitor()">
-                        <span class="collapse-icon" x-text="showMidi ? '&#9660;' : '&#9654;'"></span>
-                        <span class="midi-monitor-title">MIDI Output</span>
-                        <span class="midi-monitor-hint" x-show="!showMidi">click to monitor</span>
-                    </div>
-                    <div class="midi-log-wrap" x-show="showMidi" x-ref="midiLogContainer">
-                        <template x-for="(line, i) in midiLog" :key="i">
-                            <div class="midi-log-line" x-text="line"></div>
-                        </template>
-                        <div class="midi-log-empty" x-show="midiLog.length === 0">
-                            Waiting for MIDI output...
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Log Tabs -->
-                <div class="log-tabs">
-                    <span class="log-tab" :class="{ active: activeTab === 'command' }"
-                          @click="activeTab = 'command'">Command Log</span>
-                    <span class="log-tab" :class="{ active: activeTab === 'ai' }"
-                          @click="activeTab = 'ai'">AI Chat</span>
-                </div>
-                <div class="log-container log-tabbed" x-ref="logContainer" x-show="activeTab === 'command'">
-                    <template x-for="(entry, i) in log" :key="i">
-                        <div class="log-entry" x-text="entry"></div>
-                    </template>
-                    <div class="log-empty" x-show="log.length === 0">
-                        Command output will appear here.
-                    </div>
-                </div>
-                <div class="log-container log-tabbed" x-ref="aiLogContainer" x-show="activeTab === 'ai'">
-                    <template x-for="(entry, i) in aiLog" :key="i">
-                        <div class="log-entry" x-text="entry"></div>
-                    </template>
-                    <div class="log-empty" x-show="aiLog.length === 0">
-                        AI responses will appear here.
-                    </div>
-                </div>
-
-                <!-- Command Hint -->
-                <div class="command-hint" x-show="commandHint" x-text="commandHint"></div>
-
-                <!-- Dual Input -->
-                <div class="input-row">
-                    <form class="input-group" @submit.prevent="sendCommand(commandInput)">
-                        <span class="input-icon">&#9834;</span>
-                        <input type="text" x-model="commandInput"
-                               placeholder="direct command..."
-                               autocomplete="off"
-                               @keydown="handleCommandKeydown($event)">
-                    </form>
-                    <form class="input-group" @submit.prevent="sendAI(aiInput)">
-                        <span class="input-icon">&#129302;</span>
-                        <input type="text" x-model="aiInput"
-                               placeholder="describe what you want..."
-                               :disabled="aiLoading"
-                               autocomplete="off">
-                        <span class="ai-spinner" x-show="aiLoading">...</span>
-                    </form>
-                </div>
-
             </div>
 
             <!-- Right Panel: Overview -->
@@ -257,6 +194,72 @@ run &lt;file.txt&gt;        run command script</pre>
                         </div>
                     </template>
                 </div>
+            </div>
+        </div>
+
+        <!-- Command View -->
+        <div class="command-view">
+            <!-- MIDI Output Monitor -->
+            <div class="midi-monitor">
+                <div class="midi-monitor-header" @click="toggleMidiMonitor()">
+                    <span class="collapse-icon" x-text="showMidi ? '&#9660;' : '&#9654;'"></span>
+                    <span class="midi-monitor-title">MIDI Output</span>
+                    <span class="midi-monitor-hint" x-show="!showMidi">click to monitor</span>
+                </div>
+                <div class="midi-log-wrap" x-show="showMidi" x-ref="midiLogContainer">
+                    <template x-for="(line, i) in midiLog" :key="i">
+                        <div class="midi-log-line" x-text="line"></div>
+                    </template>
+                    <div class="midi-log-empty" x-show="midiLog.length === 0">
+                        Waiting for MIDI output...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Log Tabs -->
+            <div class="log-tabs">
+                <span class="log-tab" :class="{ active: activeTab === 'command' }"
+                      @click="activeTab = 'command'">Command Log</span>
+                <span class="log-tab" :class="{ active: activeTab === 'ai' }"
+                      @click="activeTab = 'ai'">AI Chat</span>
+            </div>
+            <div class="log-container log-tabbed" x-ref="logContainer" x-show="activeTab === 'command'">
+                <template x-for="(entry, i) in log" :key="i">
+                    <div class="log-entry" x-text="entry"></div>
+                </template>
+                <div class="log-empty" x-show="log.length === 0">
+                    Command output will appear here.
+                </div>
+            </div>
+            <div class="log-container log-tabbed" x-ref="aiLogContainer" x-show="activeTab === 'ai'">
+                <template x-for="(entry, i) in aiLog" :key="i">
+                    <div class="log-entry" x-text="entry"></div>
+                </template>
+                <div class="log-empty" x-show="aiLog.length === 0">
+                    AI responses will appear here.
+                </div>
+            </div>
+
+            <!-- Command Hint -->
+            <div class="command-hint" x-show="commandHint" x-text="commandHint"></div>
+
+            <!-- Dual Input -->
+            <div class="input-row">
+                <form class="input-group" @submit.prevent="sendCommand(commandInput)">
+                    <span class="input-icon">&#9834;</span>
+                    <input type="text" x-model="commandInput"
+                           placeholder="direct command..."
+                           autocomplete="off"
+                           @keydown="handleCommandKeydown($event)">
+                </form>
+                <form class="input-group" @submit.prevent="sendAI(aiInput)">
+                    <span class="input-icon">&#129302;</span>
+                    <input type="text" x-model="aiInput"
+                           placeholder="describe what you want..."
+                           :disabled="aiLoading"
+                           autocomplete="off">
+                    <span class="ai-spinner" x-show="aiLoading">...</span>
+                </form>
             </div>
         </div>
 

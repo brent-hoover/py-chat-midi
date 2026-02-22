@@ -31,6 +31,7 @@ main {
     gap: 0.5rem;
     height: 100vh;
     overflow: hidden;
+    box-sizing: border-box;
 }
 
 /* ── Transport Bar ────────────────────────────────────── */
@@ -645,6 +646,14 @@ main {
     50% { opacity: 0.8; }
 }
 
+/* ── Command View ────────────────────────────────────── */
+.command-view {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
 /* ── Shortcut Bar ────────────────────────────────────── */
 .shortcut-bar {
     display: flex;
@@ -794,17 +803,6 @@ main {
 
 /* ── Responsive ───────────────────────────────────────── */
 @media (max-width: 700px) {
-    .split-container {
-        flex-direction: column;
-    }
-
-    .overview-panel {
-        width: 100%;
-        min-width: 0;
-        max-height: 140px;
-        order: -1;
-    }
-
     .input-row {
         flex-direction: column;
     }

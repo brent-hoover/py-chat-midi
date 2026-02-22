@@ -21,12 +21,12 @@ function sequencer() {
         midiLog: [],                // scrolling text MIDI output
         midiLogMax: 200,
         _pendingMidiNotes: [],      // accumulator for current step
-        layoutWidth: localStorage.getItem('layoutWidth') || '100%',
+        layoutWidth: localStorage.getItem('layoutWidth') || 'none',
         layoutPresets: [
             { label: 'Compact', value: '960px' },
             { label: 'Normal', value: '1200px' },
             { label: 'Wide', value: '1600px' },
-            { label: 'Full', value: '100%' },
+            { label: 'Full', value: 'none' },
         ],
 
         // Command history
@@ -37,6 +37,12 @@ function sequencer() {
         init() {
             this.log = JSON.parse(localStorage.getItem('log') || '[]');
             this.aiLog = JSON.parse(localStorage.getItem('aiLog') || '[]');
+            // Migrate old layoutWidth values
+            if (this.layoutWidth === '100%') {
+                this.layoutWidth = 'none';
+                localStorage.setItem('layoutWidth', 'none');
+            }
+            this.applyLayoutWidth();
             this.connect();
             this.loadCommandMeta();
             window.addEventListener('keydown', (e) => this.handleGlobalKeydown(e));
@@ -208,9 +214,9 @@ function sequencer() {
                 event.preventDefault();
                 this.switchTab('toggle');
             }
-            if (event.ctrlKey && event.key >= '1' && event.key <= '4') {
+            if (event.ctrlKey && ['Digit1','Digit2','Digit3','Digit4'].includes(event.code)) {
                 event.preventDefault();
-                const idx = parseInt(event.key) - 1;
+                const idx = parseInt(event.code.slice(-1)) - 1;
                 this.setLayoutWidth(this.layoutPresets[idx].value);
             }
         },
@@ -226,6 +232,17 @@ function sequencer() {
         setLayoutWidth(value) {
             this.layoutWidth = value;
             localStorage.setItem('layoutWidth', value);
+            this.applyLayoutWidth();
+        },
+
+        applyLayoutWidth() {
+            const el = document.querySelector('main');
+            if (!el) return;
+            if (this.layoutWidth === 'none') {
+                el.style.removeProperty('max-width');
+            } else {
+                el.style.setProperty('max-width', this.layoutWidth, 'important');
+            }
         },
 
         get shortcuts() {

@@ -1853,7 +1853,7 @@ class ChatInterface:
             "compact": "960px",
             "normal": "1200px",
             "wide": "1600px",
-            "full": "100%",
+            "full": "none",
         }
         label = args.strip().lower()
         if label not in presets:
