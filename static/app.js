@@ -18,6 +18,7 @@ function sequencer() {
         showHelp: false,
         showMidi: false,
         macroEditor: { open: false, name: '', commands: '', params: [] },
+        octaveOffset: 0,            // 0=Element, -1=Yamaha, -2=Ableton
         midiLog: [],                // scrolling text MIDI output
         midiLogMax: 200,
         _pendingMidiNotes: [],      // accumulator for current step
@@ -82,6 +83,7 @@ function sequencer() {
                 this.patterns = msg.patterns;
                 this.bpm = msg.bpm;
                 this.playing = msg.playing;
+                if (msg.octave_offset !== undefined) this.octaveOffset = msg.octave_offset;
                 // Clear stale selection if pattern was deleted
                 if (this.selectedPattern && !this.patterns[this.selectedPattern]) {
                     this.selectedPattern = null;
@@ -210,7 +212,7 @@ function sequencer() {
                 event.preventDefault();
                 this.sendCommand(this.playing ? 'stop' : 'play');
             }
-            if (event.ctrlKey && event.key === 'Tab') {
+            if (event.ctrlKey && event.key === '`') {
                 event.preventDefault();
                 this.switchTab('toggle');
             }
@@ -248,7 +250,7 @@ function sequencer() {
         get shortcuts() {
             return [
                 { keys: 'Ctrl+Space', label: 'Play/Stop' },
-                { keys: 'Ctrl+Tab', label: 'Switch Tab' },
+                { keys: 'Ctrl+`', label: 'Switch Tab' },
                 { keys: 'Ctrl+1-4', label: 'Width' },
             ];
         },
@@ -421,7 +423,7 @@ function sequencer() {
                 // Note info
                 for (const n of g.notes) {
                     const name = n.ch === 9 ? this.drumName(n.note) : n.name;
-                    let s = name + ' v' + n.vel;
+                    let s = name + '(' + n.note + ') v' + n.vel;
                     if (n.gate !== 1) s += ' g' + n.gate;
                     if (n.swing > 0) s += ' sw' + n.swing;
                     strs.push(s);
@@ -531,7 +533,7 @@ function sequencer() {
 
         noteName(midi) {
             const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-            const octave = Math.floor(midi / 12) - 1;
+            const octave = Math.floor(midi / 12) + this.octaveOffset;
             return names[midi % 12] + octave;
         },
 

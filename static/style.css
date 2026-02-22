@@ -484,7 +484,7 @@ main {
 .midi-log-wrap {
     border-top: 1px solid #2a2a3e;
     padding: 0.4rem 0.6rem;
-    max-height: 200px;
+    max-height: 100px;
     overflow-y: auto;
     font-family: monospace;
     font-size: 0.75rem;

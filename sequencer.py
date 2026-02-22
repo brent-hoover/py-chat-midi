@@ -37,6 +37,13 @@ DRUM_MAP = {
     "cowbell": 56,
     "rimshot": 37,
 }
+_GM_DRUM_DEFAULTS = dict(DRUM_MAP)  # immutable copy for drummap replacements
+OCTAVE_PRESETS = {
+    "element": 0,   # MIDI 60 = C5 (Element, current default)
+    "yamaha": -1,    # MIDI 60 = C4 (Yamaha, Roland, Logic)
+    "ableton": -2,   # MIDI 60 = C3 (Ableton, Battery, FL Studio)
+}
+
 SCALE_INTERVALS = {
     "major": [0, 2, 4, 5, 7, 9, 11],
     "minor": [0, 2, 3, 5, 7, 8, 10],
@@ -60,7 +67,7 @@ CATEGORY_ORDER = [
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def note_name_to_midi(name: str) -> int:
+def note_name_to_midi(name: str, octave_offset: int = 0) -> int:
     """Convert e.g. 'C4', 'F#3', 'Bb5' to MIDI note number."""
     name = name.strip().replace("b", "#")  # normalize flats crudely
     # handle double-sharp edge cases? nah.
@@ -68,15 +75,15 @@ def note_name_to_midi(name: str) -> int:
     if not match:
         raise ValueError(f"Invalid note name: {name}")
     pitch, octave = match.group(1).upper(), int(match.group(2))
-    return NOTE_NAMES.index(pitch) + (octave + 1) * 12
+    return NOTE_NAMES.index(pitch) + (octave - octave_offset) * 12
 
 
-def midi_to_note_name(midi_num: int) -> str:
-    octave = (midi_num // 12) - 1
+def midi_to_note_name(midi_num: int, octave_offset: int = 0) -> str:
+    octave = midi_num // 12 + octave_offset
     return f"{NOTE_NAMES[midi_num % 12]}{octave}"
 
 
-def parse_note_list(text: str) -> list[int]:
+def parse_note_list(text: str, octave_offset: int = 0) -> list[int]:
     """Parse a space/comma separated list of note names or MIDI numbers."""
     tokens = re.split(r"[\s,]+", text.strip())
     notes = []
@@ -88,7 +95,7 @@ def parse_note_list(text: str) -> list[int]:
         elif t.lower() in DRUM_MAP:
             notes.append(DRUM_MAP[t.lower()])
         else:
-            notes.append(note_name_to_midi(t))
+            notes.append(note_name_to_midi(t, octave_offset))
     return notes
 
 
@@ -168,6 +175,8 @@ class Sequencer:
         self.playing = False
         self.current_step = 0
         self.patterns: dict[str, Pattern] = {}
+        settings = _load_settings()
+        self.octave_offset: int = settings.get("octave_offset", 0)
         self.active_notes: list[tuple[int, int, float]] = []  # (note, channel, off_time)
 
         # Open virtual MIDI port
@@ -220,7 +229,7 @@ class Sequencer:
             self._send(msg)
             off_time = now + self.step_duration * gate * 0.9
             self.active_notes.append((note, pat.channel, off_time))
-            note_name = midi_to_note_name(note)
+            note_name = midi_to_note_name(note, self.octave_offset)
             fired.append(
                 {
                     "note": note,
@@ -416,6 +425,7 @@ class Sequencer:
             "type": "state",
             "bpm": self.bpm,
             "playing": self.playing,
+            "octave_offset": self.octave_offset,
             "patterns": {name: pat.to_dict() for name, pat in self.patterns.items()},
         }
         return state
@@ -424,7 +434,8 @@ class Sequencer:
         """Return a compact human-readable description of the full song state."""
         lines = []
         status = "playing" if self.playing else "stopped"
-        lines.append(f"BPM: {self.bpm}  Status: {status}")
+        preset = next((k for k, v in OCTAVE_PRESETS.items() if v == self.octave_offset), "custom")
+        lines.append(f"BPM: {self.bpm}  Status: {status}  Octave: {preset}")
         lines.append(f"Patterns: {len(self.patterns)}")
         lines.append("")
 
@@ -456,7 +467,7 @@ class Sequencer:
                     if pat.channel == 9 and note in reverse_drums:
                         label = f"{reverse_drums[note]}({note})"
                     else:
-                        label = f"{midi_to_note_name(note)}({note})"
+                        label = f"{midi_to_note_name(note, self.octave_offset)}({note})"
 
                     # Collect steps, velocities, gates for this note
                     hits = []
@@ -511,6 +522,7 @@ class Sequencer:
         data = {
             "bpm": self.bpm,
             "steps_per_beat": self.steps_per_beat,
+            "octave_offset": self.octave_offset,
             "patterns": {name: pat.to_dict() for name, pat in self.patterns.items()},
             "drum_map": dict(DRUM_MAP),
         }
@@ -525,6 +537,7 @@ class Sequencer:
             data = json.load(f)
         self.bpm = data["bpm"]
         self.steps_per_beat = data.get("steps_per_beat", 4)
+        self.octave_offset = data.get("octave_offset", 0)
         self.patterns.clear()
         for name, pat_dict in data["patterns"].items():
             self.patterns[name] = Pattern.from_dict(pat_dict)
@@ -566,6 +579,20 @@ class Macro:
 
 
 MACROS_DIR = Path(__file__).parent / "macros"
+SETTINGS_FILE = Path(__file__).parent / "settings.json"
+
+
+def _load_settings() -> dict:
+    if SETTINGS_FILE.exists():
+        try:
+            return json.loads(SETTINGS_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _save_settings(settings: dict):
+    SETTINGS_FILE.write_text(json.dumps(settings, indent=2))
 
 
 @dataclass
@@ -654,6 +681,7 @@ class ChatInterface:
     def _restore(self, snapshot: dict):
         """Restore sequencer state from a snapshot."""
         self.seq.bpm = snapshot["bpm"]
+        self.seq.octave_offset = snapshot.get("octave_offset", 0)
         self.seq.patterns.clear()
         for name, pat_dict in snapshot["patterns"].items():
             self.seq.patterns[name] = Pattern.from_dict(pat_dict)
@@ -723,6 +751,12 @@ class ChatInterface:
             self._emit(f"  > {cmd_line}")
             _, out = self.handle(cmd_line)
             self._output.extend(out)
+
+    def _note_name(self, midi_num: int) -> str:
+        return midi_to_note_name(midi_num, self.seq.octave_offset)
+
+    def _parse_notes(self, text: str) -> list[int]:
+        return parse_note_list(text, self.seq.octave_offset)
 
     def parse_steps(self, text: str, max_steps: int) -> list[int]:
         """Parse step specifiers: '0,4,8,12' or '0-7' or '0-15:2' (stride)."""
@@ -836,13 +870,13 @@ class ChatInterface:
             state = "muted" if pat.muted else "unmuted"
             self._emit(f"  ✓ '{pat_name}' {state}")
         else:
-            note = parse_note_list(parts[1])[0]
+            note = self._parse_notes(parts[1])[0]
             if note in pat.muted_notes:
                 pat.muted_notes.discard(note)
-                self._emit(f"  ✓ Unmuted {midi_to_note_name(note)} in '{pat_name}'")
+                self._emit(f"  ✓ Unmuted {self._note_name(note)} in '{pat_name}'")
             else:
                 pat.muted_notes.add(note)
-                self._emit(f"  ✓ Muted {midi_to_note_name(note)} in '{pat_name}'")
+                self._emit(f"  ✓ Muted {self._note_name(note)} in '{pat_name}'")
 
     @command(
         "unmute",
@@ -893,17 +927,17 @@ class ChatInterface:
                     p.muted = n != pat_name
                 self._emit(f"  ✓ Solo '{pat_name}'")
         else:
-            note = parse_note_list(parts[1])[0]
+            note = self._parse_notes(parts[1])[0]
             all_notes = set()
             for step_notes in pat.data.values():
                 for n, _v, _g in step_notes:
                     all_notes.add(n)
             if pat.muted_notes == all_notes - {note}:
                 pat.muted_notes.clear()
-                self._emit(f"  ✓ Unsolo'd {midi_to_note_name(note)} in '{pat_name}'")
+                self._emit(f"  ✓ Unsolo'd {self._note_name(note)} in '{pat_name}'")
             else:
                 pat.muted_notes = all_notes - {note}
-                self._emit(f"  ✓ Solo {midi_to_note_name(note)} in '{pat_name}'")
+                self._emit(f"  ✓ Solo {self._note_name(note)} in '{pat_name}'")
 
     # ── Editing ───────────────────────────────────────────────────────────
 
@@ -929,7 +963,7 @@ class ChatInterface:
 
         pat = self.seq.patterns[pat_name]
         steps = self.parse_steps(step_str, pat.steps)
-        notes = parse_note_list(note_str)
+        notes = self._parse_notes(note_str)
 
         for s in steps:
             for n in notes:
@@ -955,7 +989,7 @@ class ChatInterface:
             return
         pat = self.seq.patterns[pat_name]
         steps = self.parse_steps(step_str, pat.steps)
-        note = parse_note_list(note_str)[0]
+        note = self._parse_notes(note_str)[0]
         new_vel = int(vel_str)
         count = 0
         for s in steps:
@@ -981,7 +1015,7 @@ class ChatInterface:
             return
         pat = self.seq.patterns[pat_name]
         steps = self.parse_steps(step_str, pat.steps)
-        note = parse_note_list(note_str)[0]
+        note = self._parse_notes(note_str)[0]
         count = 0
         for s in steps:
             before = len(pat.data.get(s, []))
@@ -1027,8 +1061,8 @@ class ChatInterface:
         if pat_name not in self.seq.patterns:
             self._emit(f"  Pattern '{pat_name}' not found")
             return
-        old_note = parse_note_list(old_str)[0]
-        new_note = parse_note_list(new_str)[0]
+        old_note = self._parse_notes(old_str)[0]
+        new_note = self._parse_notes(new_str)[0]
         pat = self.seq.patterns[pat_name]
         count = 0
         for step in list(pat.data.keys()):
@@ -1062,7 +1096,7 @@ class ChatInterface:
                 all_notes.add(n)
 
         for note in sorted(all_notes, reverse=True):
-            label = midi_to_note_name(note).rjust(4)
+            label = self._note_name(note).rjust(4)
             row = ""
             for s in range(pat.steps):
                 hit = any(n == note for n, v, g in pat.data.get(s, []))
@@ -1111,7 +1145,7 @@ class ChatInterface:
             return
 
         pat = self.seq.patterns[pat_name]
-        notes = parse_note_list(note_str)
+        notes = self._parse_notes(note_str)
         steps = self.euclidean_rhythm(hits, pat.steps)
 
         pat.clear()
@@ -1142,7 +1176,7 @@ class ChatInterface:
         import random as rnd
 
         pat = self.seq.patterns[pat_name]
-        notes = parse_note_list(note_str)
+        notes = self._parse_notes(note_str)
 
         if style == "up":
             sequence = notes
@@ -1183,13 +1217,13 @@ class ChatInterface:
         pat = self.seq.patterns[pat_name]
         val = max(0, min(100, int(parts[1])))
         if len(parts) >= 3:
-            note = parse_note_list(parts[2])[0]
+            note = self._parse_notes(parts[2])[0]
             if val == 0:
                 pat.swing_notes.pop(note, None)
-                self._emit(f"  ✓ {midi_to_note_name(note)} in '{pat_name}' → no swing")
+                self._emit(f"  ✓ {self._note_name(note)} in '{pat_name}' → no swing")
             else:
                 pat.swing_notes[note] = val
-                self._emit(f"  ✓ {midi_to_note_name(note)} in '{pat_name}' swing → {val}%")
+                self._emit(f"  ✓ {self._note_name(note)} in '{pat_name}' swing → {val}%")
         else:
             pat.swing = val
             self._emit(f"  ✓ '{pat_name}' swing → {val}%")
@@ -1338,7 +1372,7 @@ class ChatInterface:
         if not parts:
             self._emit("Usage: tap <note> [velocity] [channel]")
             return
-        note = parse_note_list(parts[0])[0]
+        note = self._parse_notes(parts[0])[0]
         vel = int(parts[1]) if len(parts) > 1 else 100
         ch = int(parts[2]) if len(parts) > 2 else 0
         self.seq._send(mido.Message("note_on", note=note, channel=ch, velocity=vel))
@@ -1347,17 +1381,44 @@ class ChatInterface:
             self.seq._send,
             args=(mido.Message("note_off", note=note, channel=ch, velocity=0),),
         ).start()
-        self._emit(f"  ✓ {midi_to_note_name(note)} v{vel} ch{ch}")
+        self._emit(f"  ✓ {self._note_name(note)} v{vel} ch{ch}")
         self.seq._notify(
             {
                 "type": "midi_out",
                 "pattern": "tap",
                 "step": -1,
                 "notes": [
-                    {"note": note, "name": midi_to_note_name(note), "vel": vel, "gate": 1, "ch": ch}
+                    {"note": note, "name": self._note_name(note), "vel": vel, "gate": 1, "ch": ch}
                 ],
             }
         )
+
+    # ── Settings ──────────────────────────────────────────────────────────
+
+    @command(
+        "octave",
+        "midi",
+        "set note naming convention",
+        usage="octave <element|yamaha|ableton>",
+        hint_args=["<element|yamaha|ableton>"],
+    )
+    def cmd_octave(self, args: str):
+        if not args:
+            preset = next(
+                (k for k, v in OCTAVE_PRESETS.items() if v == self.seq.octave_offset), "custom"
+            )
+            self._emit(f"  Current: {preset} (offset {self.seq.octave_offset})")
+            self._emit("  Presets: " + ", ".join(OCTAVE_PRESETS.keys()))
+            return
+        key = args.strip().lower()
+        if key not in OCTAVE_PRESETS:
+            self._emit(f"  Unknown preset '{key}'. Use: {', '.join(OCTAVE_PRESETS.keys())}")
+            return
+        self.seq.octave_offset = OCTAVE_PRESETS[key]
+        settings = _load_settings()
+        settings["octave_offset"] = self.seq.octave_offset
+        _save_settings(settings)
+        self._emit(f"  ✓ Octave naming → {key} (MIDI 60 = {self._note_name(60)})")
 
     # ── Macros ────────────────────────────────────────────────────────────
 
@@ -1667,7 +1728,7 @@ class ChatInterface:
     def cmd_drums(self, args: str):
         self._emit("  Drum aliases:")
         for name, note in sorted(DRUM_MAP.items(), key=lambda x: x[1]):
-            self._emit(f"    {name:10s} → {note} ({midi_to_note_name(note)})")
+            self._emit(f"    {name:10s} → {note} ({self._note_name(note)})")
 
     @command(
         "drummap",
@@ -1703,18 +1764,51 @@ class ChatInterface:
         elif len(parts) == 1:
             name = parts[0].lower()
             if name in DRUM_MAP:
-                self._emit(f"  {name} → {DRUM_MAP[name]} ({midi_to_note_name(DRUM_MAP[name])})")
+                self._emit(f"  {name} → {DRUM_MAP[name]} ({self._note_name(DRUM_MAP[name])})")
             else:
                 self._emit(f"  '{name}' not in drum map")
         elif len(parts) >= 2:
             name = parts[0].lower()
             try:
-                note = int(parts[1]) if parts[1].isdigit() else note_name_to_midi(parts[1])
+                new_note = (
+                    int(parts[1])
+                    if parts[1].isdigit()
+                    else note_name_to_midi(parts[1], self.seq.octave_offset)
+                )
             except ValueError as e:
                 self._emit(f"  Error: {e}")
                 return
-            DRUM_MAP[name] = note
-            self._emit(f"  ✓ {name} → {note} ({midi_to_note_name(note)})")
+            old_note = DRUM_MAP.get(name)
+            DRUM_MAP[name] = new_note
+            # Find notes to replace in ch9 patterns: the old mapping,
+            # plus the GM default if different (handles stale saves)
+            replace_notes = set()
+            if old_note is not None and old_note != new_note:
+                replace_notes.add(old_note)
+            gm_default = _GM_DRUM_DEFAULTS.get(name)
+            if gm_default is not None and gm_default != new_note:
+                replace_notes.add(gm_default)
+            moved = 0
+            if replace_notes:
+                for pat in self.seq.patterns.values():
+                    if pat.channel != 9:
+                        continue
+                    for step in list(pat.data.keys()):
+                        pat.data[step] = [
+                            (new_note, v, g) if n in replace_notes else (n, v, g)
+                            for n, v, g in pat.data[step]
+                        ]
+                        moved += sum(1 for n, _v, _g in pat.data[step] if n == new_note)
+                    # Update muted_notes
+                    for old in replace_notes:
+                        if old in pat.muted_notes:
+                            pat.muted_notes.discard(old)
+                            pat.muted_notes.add(new_note)
+                        if old in pat.swing_notes:
+                            pat.swing_notes[new_note] = pat.swing_notes.pop(old)
+            self._emit(f"  ✓ {name} → {new_note} ({self._note_name(new_note)})")
+            if moved:
+                self._emit(f"    Updated {moved} hit(s) in drum patterns")
 
     @command("describe", "other", "show compact song overview")
     def cmd_describe(self, args: str):
