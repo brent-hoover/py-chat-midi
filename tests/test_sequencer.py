@@ -40,6 +40,36 @@ def run(chat, cmd):
     return output
 
 
+# ── Note parsing ─────────────────────────────────────────────────────────
+
+
+class TestNoteParsing:
+    def test_b_natural_not_mangled(self):
+        """B2 should parse as B natural, not crash from 'b' being treated as flat."""
+        midi = note_name_to_midi("B2")
+        assert midi == 12 * 2 + 11  # B is index 11
+
+    def test_b_natural_lowercase(self):
+        midi = note_name_to_midi("b2")
+        assert midi == 12 * 2 + 11
+
+    def test_bb_is_a_sharp(self):
+        """Bb5 should be A#5, not B#5."""
+        assert note_name_to_midi("Bb5") == note_name_to_midi("A#5")
+
+    def test_eb_is_d_sharp(self):
+        assert note_name_to_midi("Eb3") == note_name_to_midi("D#3")
+
+    def test_ab_is_g_sharp(self):
+        assert note_name_to_midi("Ab4") == note_name_to_midi("G#4")
+
+    def test_put_b2_no_error(self, chat):
+        """put with B2 should not raise."""
+        run(chat, "new test 16 0")
+        out = run(chat, "put test 0 B2")
+        assert any("✓" in line for line in out)
+
+
 # ── Load & basic commands ─────────────────────────────────────────────────
 
 
@@ -371,6 +401,58 @@ class TestNoteEditing:
         for s in [0, 4]:
             assert any(n == 38 for n, v, g in pat.data.get(s, []))
             assert not any(n == 36 for n, v, g in pat.data.get(s, []))
+
+
+class TestVolume:
+    def test_volume_decrease(self, chat):
+        run(chat, "new beat 16 9")
+        run(chat, "put beat 0,4 kick 100")
+        run(chat, "volume beat -20")
+        pat = chat.seq.patterns["beat"]
+        for s in [0, 4]:
+            assert pat.data[s][0][1] == 80
+
+    def test_volume_increase(self, chat):
+        run(chat, "new beat 16 9")
+        run(chat, "put beat 0 kick 80")
+        run(chat, "volume beat +20")
+        pat = chat.seq.patterns["beat"]
+        assert pat.data[0][0][1] == 100
+
+    def test_volume_clamps_to_127(self, chat):
+        run(chat, "new beat 16 9")
+        run(chat, "put beat 0 kick 120")
+        run(chat, "volume beat +50")
+        pat = chat.seq.patterns["beat"]
+        assert pat.data[0][0][1] == 127
+
+    def test_volume_clamps_to_1(self, chat):
+        run(chat, "new beat 16 9")
+        run(chat, "put beat 0 kick 10")
+        run(chat, "volume beat -50")
+        pat = chat.seq.patterns["beat"]
+        assert pat.data[0][0][1] == 1
+
+    def test_volume_percent_decrease(self, chat):
+        run(chat, "new beat 16 9")
+        run(chat, "put beat 0 kick 100")
+        run(chat, "volume beat -50%")
+        pat = chat.seq.patterns["beat"]
+        assert pat.data[0][0][1] == 50
+
+    def test_volume_percent_increase(self, chat):
+        run(chat, "new beat 16 9")
+        run(chat, "put beat 0 kick 80")
+        run(chat, "volume beat +50%")
+        pat = chat.seq.patterns["beat"]
+        assert pat.data[0][0][1] == 120
+
+    def test_vol_alias(self, chat):
+        run(chat, "new beat 16 9")
+        run(chat, "put beat 0 kick 100")
+        out = run(chat, "vol beat -10")
+        assert any("✓" in line for line in out)
+        assert chat.seq.patterns["beat"].data[0][0][1] == 90
 
 
 # ── Generators ───────────────────────────────────────────────────────────
