@@ -1,16 +1,14 @@
 import asyncio
 import atexit
 import json
-import os
 import sys
 from pathlib import Path
 
-import anthropic
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
+from ai import AIRequest, handle_ai_request
 from sequencer import DRUM_MAP, ChatInterface, Macro, Pattern, _command_registry
 
 AUTOSAVE_PATH = Path(__file__).parent / ".autosave.json"
@@ -32,6 +30,8 @@ def _autosave():
             "patterns": {name: pat.to_dict() for name, pat in chat.seq.patterns.items()},
             "drum_map": dict(DRUM_MAP),
             "macros": project_macros,
+            "history": chat._history,
+            "next_id": chat._next_id,
         }
         AUTOSAVE_PATH.write_text(json.dumps(data))
     except Exception:
@@ -57,6 +57,9 @@ def _autoload():
                 macro = Macro.from_dict(mdata)
                 macro.scope = "project"
                 chat._macros[name] = macro
+        if "history" in data:
+            chat._history = [tuple(h) for h in data["history"]]
+            chat._next_id = data.get("next_id", 1)
         n = len(chat.seq.patterns)
         print(f"  ✓ Restored {n} pattern(s) from autosave ({chat.seq.bpm} BPM)")
     except Exception:
@@ -163,59 +166,14 @@ async def websocket_endpoint(ws: WebSocket):
         clients.discard(ws)
 
 
-SYSTEM_PROMPT = """\
-You are a MIDI sequencer assistant. \
-Translate the user's musical request into sequencer commands.
-
-Available commands:
-- bpm <N> — set tempo
-- new <name> <steps> <channel> — create pattern (channel 9 = GM drums)
-- put <pattern> <steps> <notes> [velocity] [gate] — set notes at steps
-- clear <pattern> [steps] — clear steps or all
-- euclid <pattern> <hits> [notes] [velocity] — Euclidean rhythm
-- arp <pattern> <notes> <up|down|updown|random> — arpeggiator
-- mute <pattern> — toggle mute
-- delete <pattern> — remove pattern
-- play — start playback
-- stop — stop playback
-
-Drum names (channel 9): kick, snare, clap, hihat, ohh, tom1, tom2, tom3, \
-crash, ride, cowbell, rimshot
-Notes: C4, D#3, etc. Step ranges: 0,4,8,12 or 0-15 or 0-15:2 (stride)
-
-Respond with ONLY the commands, one per line. No explanations."""
-
-
-class AIRequest(BaseModel):
-    message: str
-
-
 @app.post("/api/ai")
 async def ai_translate(req: AIRequest):
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
-
-    client = anthropic.Anthropic(api_key=api_key)
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1024,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": req.message}],
-    )
-
-    raw = message.content[0].text.strip().split("\n")
-    commands = [line.strip() for line in raw if line.strip()]
-
-    all_output = []
-    for cmd in commands:
-        cont, output = chat.handle(cmd)
-        all_output.extend(output)
-
-    # Broadcast updated state to all WebSocket clients
+    try:
+        result = handle_ai_request(chat, req)
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from None
     await broadcast(chat.seq.get_state())
-
-    return {"commands": commands, "output": all_output}
+    return result
 
 
 @app.get("/api/commands")

@@ -11,7 +11,7 @@
     <script src="/static/app.js"></script>
 </head>
 <body>
-    <main x-data="sequencer()">
+    <main x-data="sequencer()" :style="'max-width:' + layoutWidth">
         <!-- Transport Bar -->
         <div class="transport-bar">
             <div class="transport-controls">
@@ -27,6 +27,15 @@
                        @change="loadSession($event)">
             </div>
             <button class="btn-session" @click="showHelp = !showHelp">?</button>
+            <div class="transport-session">
+                <select class="btn-session"
+                        @change="setLayoutWidth($event.target.value)"
+                        style="cursor:pointer">
+                    <template x-for="p in layoutPresets" :key="p.value">
+                        <option :value="p.value" x-text="p.label" :selected="layoutWidth === p.value"></option>
+                    </template>
+                </select>
+            </div>
             <div class="transport-bpm">
                 <label>BPM</label>
                 <input type="number" min="20" max="300"
@@ -89,112 +98,176 @@ run &lt;file.txt&gt;        run command script</pre>
             </div>
         </div>
 
-        <!-- All Pattern Grids -->
-        <div class="patterns-container">
-            <div class="pattern-hint" x-show="patternNames.length === 0">
-                No patterns yet. Use a command to create one.
-            </div>
-
-            <template x-for="name in patternNames" :key="name">
-                <div class="pattern-section">
-                    <div class="pattern-header" @click="togglePattern(name)">
-                        <span class="collapse-icon" x-text="isCollapsed(name) ? '&#9654;' : '&#9660;'"></span>
-                        <span class="pattern-name" x-text="name"></span>
-                        <span class="pattern-info"
-                              x-text="'ch=' + patterns[name].channel + ' &middot; ' + patterns[name].steps + ' steps'"></span>
-                        <span class="pattern-muted" x-show="patterns[name].muted">[MUTED]</span>
-                    </div>
-                    <div class="grid-container" x-show="!isCollapsed(name)">
-                        <div class="grid-scroll">
-                            <table class="pattern-grid">
-                                <thead>
-                                    <tr>
-                                        <th class="note-label-header"></th>
-                                        <template x-for="step in patterns[name].steps" :key="step">
-                                            <th class="step-header"
-                                                :class="{
-                                                    'playhead': playing && (currentStep % patterns[name].steps) === (step - 1),
-                                                    'beat': (step - 1) % 4 === 0
-                                                }"
-                                                x-text="step - 1"></th>
-                                        </template>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <template x-for="note in getGridNotes(patterns[name])" :key="note">
-                                        <tr>
-                                            <td class="note-label" x-text="noteLabelFor(note, patterns[name].channel)"></td>
-                                            <template x-for="step in patterns[name].steps" :key="step">
-                                                <td class="grid-cell"
-                                                    :class="{
-                                                        'filled': hasNoteIn(patterns[name], step - 1, note),
-                                                        'playhead': playing && (currentStep % patterns[name].steps) === (step - 1),
-                                                        'beat': (step - 1) % 4 === 0
-                                                    }">
-                                                    <span class="cell-dot"
-                                                          x-text="hasNoteIn(patterns[name], step - 1, note) ? '\u25A0' : '\u00B7'"></span>
-                                                </td>
+        <!-- Split Container -->
+        <div class="split-container">
+            <!-- Left Panel: Detail + Controls -->
+            <div class="detail-panel">
+                <div class="panel-title">Detail</div>
+                <!-- Stacked Detail View -->
+                <div class="detail-stack" x-show="patternNames.length > 0">
+                    <template x-for="name in visiblePatterns" :key="name">
+                        <div class="detail-pattern-block"
+                             :class="{ 'selected': selectedPattern === name }">
+                            <div class="detail-header">
+                                <span class="pattern-name" x-text="name"></span>
+                                <span class="pattern-info"
+                                      x-text="'ch=' + patterns[name].channel + ' · ' + patterns[name].steps + ' steps'"></span>
+                                <span class="pattern-muted" x-show="patterns[name].muted">[MUTED]</span>
+                            </div>
+                            <div class="grid-container" x-show="!isCollapsed(name)">
+                                <div class="grid-scroll">
+                                    <table class="pattern-grid">
+                                        <thead>
+                                            <tr>
+                                                <th class="note-label-header"></th>
+                                                <template x-for="step in patterns[name].steps" :key="step">
+                                                    <th class="step-header"
+                                                        :class="{
+                                                            'playhead': playing && (currentStep % patterns[name].steps) === (step - 1),
+                                                            'beat': (step - 1) % 4 === 0
+                                                        }"
+                                                        x-text="step - 1"></th>
+                                                </template>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <template x-for="note in getGridNotes(patterns[name])" :key="note">
+                                                <tr>
+                                                    <td class="note-label" x-text="noteLabelFor(note, patterns[name].channel)"></td>
+                                                    <template x-for="step in patterns[name].steps" :key="step">
+                                                        <td class="grid-cell"
+                                                            :class="{
+                                                                'filled': hasNoteIn(patterns[name], step - 1, note),
+                                                                'playhead': playing && (currentStep % patterns[name].steps) === (step - 1),
+                                                                'beat': (step - 1) % 4 === 0
+                                                            }">
+                                                            <span class="cell-dot"
+                                                                  x-text="hasNoteIn(patterns[name], step - 1, note) ? '\u25A0' : '\u00B7'"></span>
+                                                        </td>
+                                                    </template>
+                                                </tr>
                                             </template>
-                                        </tr>
-                                    </template>
-                                </tbody>
-                            </table>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="grid-empty" x-show="getGridNotes(patterns[name]).length === 0">
+                                    Pattern is empty. Add notes with <code>put</code> commands.
+                                </div>
+                            </div>
                         </div>
-                        <div class="grid-empty" x-show="getGridNotes(patterns[name]).length === 0">
-                            Pattern is empty. Add notes with <code>put</code> commands.
+                    </template>
+                </div>
+
+                <!-- Empty State -->
+                <div class="detail-empty" x-show="patternNames.length === 0">
+                    <div class="detail-empty-text">No patterns yet</div>
+                    <div class="detail-empty-hint">Create one with <code>new &lt;name&gt;</code></div>
+                </div>
+
+                <!-- MIDI Output Monitor -->
+                <div class="midi-monitor">
+                    <div class="midi-monitor-header" @click="toggleMidiMonitor()">
+                        <span class="collapse-icon" x-text="showMidi ? '&#9660;' : '&#9654;'"></span>
+                        <span class="midi-monitor-title">MIDI Output</span>
+                        <span class="midi-monitor-hint" x-show="!showMidi">click to monitor</span>
+                    </div>
+                    <div class="midi-log-wrap" x-show="showMidi" x-ref="midiLogContainer">
+                        <template x-for="(line, i) in midiLog" :key="i">
+                            <div class="midi-log-line" x-text="line"></div>
+                        </template>
+                        <div class="midi-log-empty" x-show="midiLog.length === 0">
+                            Waiting for MIDI output...
                         </div>
                     </div>
                 </div>
-            </template>
-        </div>
 
-        <!-- MIDI Output Monitor -->
-        <div class="midi-monitor">
-            <div class="midi-monitor-header" @click="toggleMidiMonitor()">
-                <span class="collapse-icon" x-text="showMidi ? '&#9660;' : '&#9654;'"></span>
-                <span class="midi-monitor-title">MIDI Output</span>
-                <span class="midi-monitor-hint" x-show="!showMidi">click to monitor</span>
+                <!-- Log Tabs -->
+                <div class="log-tabs">
+                    <span class="log-tab" :class="{ active: activeTab === 'command' }"
+                          @click="activeTab = 'command'">Command Log</span>
+                    <span class="log-tab" :class="{ active: activeTab === 'ai' }"
+                          @click="activeTab = 'ai'">AI Chat</span>
+                </div>
+                <div class="log-container log-tabbed" x-ref="logContainer" x-show="activeTab === 'command'">
+                    <template x-for="(entry, i) in log" :key="i">
+                        <div class="log-entry" x-text="entry"></div>
+                    </template>
+                    <div class="log-empty" x-show="log.length === 0">
+                        Command output will appear here.
+                    </div>
+                </div>
+                <div class="log-container log-tabbed" x-ref="aiLogContainer" x-show="activeTab === 'ai'">
+                    <template x-for="(entry, i) in aiLog" :key="i">
+                        <div class="log-entry" x-text="entry"></div>
+                    </template>
+                    <div class="log-empty" x-show="aiLog.length === 0">
+                        AI responses will appear here.
+                    </div>
+                </div>
+
+                <!-- Command Hint -->
+                <div class="command-hint" x-show="commandHint" x-text="commandHint"></div>
+
+                <!-- Dual Input -->
+                <div class="input-row">
+                    <form class="input-group" @submit.prevent="sendCommand(commandInput)">
+                        <span class="input-icon">&#9834;</span>
+                        <input type="text" x-model="commandInput"
+                               placeholder="direct command..."
+                               autocomplete="off"
+                               @keydown="handleCommandKeydown($event)">
+                    </form>
+                    <form class="input-group" @submit.prevent="sendAI(aiInput)">
+                        <span class="input-icon">&#129302;</span>
+                        <input type="text" x-model="aiInput"
+                               placeholder="describe what you want..."
+                               :disabled="aiLoading"
+                               autocomplete="off">
+                        <span class="ai-spinner" x-show="aiLoading">...</span>
+                    </form>
+                </div>
+
             </div>
-            <div class="midi-log-wrap" x-show="showMidi" x-ref="midiLogContainer">
-                <template x-for="(line, i) in midiLog" :key="i">
-                    <div class="midi-log-line" x-text="line"></div>
-                </template>
-                <div class="midi-log-empty" x-show="midiLog.length === 0">
-                    Waiting for MIDI output...
+
+            <!-- Right Panel: Overview -->
+            <div class="overview-panel">
+                <div class="panel-title">Overview</div>
+                <div class="pattern-list">
+                    <div class="pattern-hint" x-show="patternNames.length === 0">
+                        No patterns yet.
+                    </div>
+                    <template x-for="name in patternNames" :key="name">
+                        <div class="pattern-list-item"
+                             :class="{ 'selected': selectedPattern === name, 'muted': patterns[name].muted }">
+                            <div class="pattern-list-header">
+                                <span class="pattern-name" x-text="name"></span>
+                                <span class="pattern-info"
+                                      x-text="'ch' + patterns[name].channel + ' · ' + patterns[name].steps + 's'"></span>
+                                <span class="pattern-muted" x-show="patterns[name].muted">M</span>
+                            </div>
+                            <div class="density-bar" x-show="!isCollapsed(name)">
+                                <template x-for="(filled, i) in getStepDensity(patterns[name])" :key="i">
+                                    <span class="density-cell"
+                                          :class="{
+                                              'filled': filled,
+                                              'playhead': playing && (currentStep % patterns[name].steps) === i
+                                          }"></span>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
                 </div>
             </div>
         </div>
 
-        <!-- Command Log -->
-        <div class="log-container" x-ref="logContainer">
-            <template x-for="(entry, i) in log" :key="i">
-                <div class="log-entry" x-text="entry"></div>
+        <!-- Shortcut Bar -->
+        <div class="shortcut-bar">
+            <template x-for="s in shortcuts" :key="s.keys">
+                <span class="shortcut-item">
+                    <kbd x-text="s.keys"></kbd>
+                    <span x-text="s.label"></span>
+                </span>
             </template>
-            <div class="log-empty" x-show="log.length === 0">
-                Command output will appear here.
-            </div>
-        </div>
-
-        <!-- Command Hint -->
-        <div class="command-hint" x-show="commandHint" x-text="commandHint"></div>
-
-        <!-- Dual Input -->
-        <div class="input-row">
-            <form class="input-group" @submit.prevent="sendCommand(commandInput)">
-                <span class="input-icon">&#9834;</span>
-                <input type="text" x-model="commandInput"
-                       placeholder="direct command..."
-                       autocomplete="off"
-                       @keydown="handleCommandKeydown($event)">
-            </form>
-            <form class="input-group" @submit.prevent="sendAI(aiInput)">
-                <span class="input-icon">&#129302;</span>
-                <input type="text" x-model="aiInput"
-                       placeholder="describe what you want..."
-                       :disabled="aiLoading"
-                       autocomplete="off">
-                <span class="ai-spinner" x-show="aiLoading">...</span>
-            </form>
         </div>
     </main>
 </body>

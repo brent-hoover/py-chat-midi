@@ -10,22 +10,37 @@ function sequencer() {
         commandInput: '',
         aiInput: '',
         aiLoading: false,
+        activeTab: 'command',
+        aiLog: [],
+        selectedPattern: null,
         collapsedPatterns: {},
+        scrollIndex: 0,
         showHelp: false,
         showMidi: false,
         macroEditor: { open: false, name: '', commands: '', params: [] },
         midiLog: [],                // scrolling text MIDI output
         midiLogMax: 200,
         _pendingMidiNotes: [],      // accumulator for current step
+        layoutWidth: localStorage.getItem('layoutWidth') || '100%',
+        layoutPresets: [
+            { label: 'Compact', value: '960px' },
+            { label: 'Normal', value: '1200px' },
+            { label: 'Wide', value: '1600px' },
+            { label: 'Full', value: '100%' },
+        ],
 
         // Command history
-        commandHistory: [],
+        commandHistory: JSON.parse(localStorage.getItem('commandHistory') || '[]'),
         historyIndex: -1,
 
         // Lifecycle
         init() {
+            this.log = JSON.parse(localStorage.getItem('log') || '[]');
+            this.aiLog = JSON.parse(localStorage.getItem('aiLog') || '[]');
             this.connect();
             this.loadCommandMeta();
+            window.addEventListener('keydown', (e) => this.handleGlobalKeydown(e));
+            this.$nextTick(() => this.scrollLog());
         },
 
         connect() {
@@ -61,6 +76,18 @@ function sequencer() {
                 this.patterns = msg.patterns;
                 this.bpm = msg.bpm;
                 this.playing = msg.playing;
+                // Clear stale selection if pattern was deleted
+                if (this.selectedPattern && !this.patterns[this.selectedPattern]) {
+                    this.selectedPattern = null;
+                }
+                // Auto-select first pattern if nothing selected
+                if (!this.selectedPattern) {
+                    const names = Object.keys(this.patterns);
+                    if (names.length > 0) this.selectedPattern = names[0];
+                }
+                // Clamp scrollIndex when patterns are deleted
+                const maxScroll = Math.max(0, Object.keys(this.patterns).length - 1);
+                if (this.scrollIndex > maxScroll) this.scrollIndex = maxScroll;
                 if (this.showMidi) this.rebuildPianoRollNotes();
             } else if (msg.type === 'playhead') {
                 this.currentStep = msg.step;
@@ -78,6 +105,12 @@ function sequencer() {
                     this.currentStep = -1;
                 }
             } else if (msg.type === 'ui') {
+                if (msg.select) {
+                    this.selectedPattern = msg.select;
+                    this.scrollToPattern(msg.select);
+                }
+                if (msg.scroll === 'up') this.scrollUp();
+                if (msg.scroll === 'down') this.scrollDown();
                 if (msg.toggle === 'midi') this.toggleMidiMonitor();
                 if (msg.toggle === 'help') this.showHelp = !this.showHelp;
                 if (msg.fold) this.collapsedPatterns[msg.fold] = true;
@@ -90,6 +123,8 @@ function sequencer() {
                         params: msg.params || [],
                     };
                 }
+                if (msg.tab) this.switchTab(msg.tab);
+                if (msg.width) this.setLayoutWidth(msg.width);
                 if (msg.macro_saved) {
                     this.macroEditor.open = false;
                 }
@@ -101,18 +136,24 @@ function sequencer() {
                         notes: msg.notes,
                         cc: msg.cc || [],
                     });
+                    // Flush immediately when not playing (e.g. tap command)
+                    if (!this.playing) {
+                        this.flushMidiLog();
+                    }
                 }
             }
         },
 
         sendCommand(line) {
             if (!line.trim()) return;
+            this.activeTab = 'command';
             this.log.push(`> ${line}`);
             this.scrollLog();
             this.ws.send(JSON.stringify({ type: 'command', line }));
             // Add to history (avoid duplicates at end)
             if (this.commandHistory[this.commandHistory.length - 1] !== line) {
                 this.commandHistory.push(line);
+                localStorage.setItem('commandHistory', JSON.stringify(this.commandHistory));
             }
             this.historyIndex = -1;
             this.commandInput = '';
@@ -126,6 +167,11 @@ function sequencer() {
         hints: {},
 
         handleCommandKeydown(event) {
+            if (event.key === ' ' && this.commandInput === '') {
+                event.preventDefault();
+                this.sendCommand(this.playing ? 'stop' : 'play');
+                return;
+            }
             if (event.key === 'Tab') {
                 event.preventDefault();
                 this.tabComplete();
@@ -151,6 +197,43 @@ function sequencer() {
                     this.commandInput = '';
                 }
             }
+        },
+
+        handleGlobalKeydown(event) {
+            if (event.ctrlKey && event.key === ' ') {
+                event.preventDefault();
+                this.sendCommand(this.playing ? 'stop' : 'play');
+            }
+            if (event.ctrlKey && event.key === 'Tab') {
+                event.preventDefault();
+                this.switchTab('toggle');
+            }
+            if (event.ctrlKey && event.key >= '1' && event.key <= '4') {
+                event.preventDefault();
+                const idx = parseInt(event.key) - 1;
+                this.setLayoutWidth(this.layoutPresets[idx].value);
+            }
+        },
+
+        switchTab(target) {
+            if (target === 'toggle' || !target) {
+                this.activeTab = this.activeTab === 'command' ? 'ai' : 'command';
+            } else if (target === 'command' || target === 'ai') {
+                this.activeTab = target;
+            }
+        },
+
+        setLayoutWidth(value) {
+            this.layoutWidth = value;
+            localStorage.setItem('layoutWidth', value);
+        },
+
+        get shortcuts() {
+            return [
+                { keys: 'Ctrl+Space', label: 'Play/Stop' },
+                { keys: 'Ctrl+Tab', label: 'Switch Tab' },
+                { keys: 'Ctrl+1-4', label: 'Width' },
+            ];
         },
 
         tabComplete() {
@@ -191,31 +274,44 @@ function sequencer() {
 
         async sendAI(message) {
             if (!message.trim()) return;
+            this.activeTab = 'ai';
             this.aiLoading = true;
-            this.log.push(`\uD83E\uDD16 ${message}`);
-            this.scrollLog();
+            this.aiLog.push(`\uD83E\uDD16 ${message}`);
+            this.scrollAiLog();
             try {
                 const res = await fetch('/api/ai', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message }),
+                    body: JSON.stringify({
+                        message,
+                        context: {
+                            selectedPattern: this.selectedPattern,
+                            playing: this.playing,
+                            bpm: this.bpm,
+                            patternNames: this.patternNames,
+                            recentCommands: this.commandHistory.slice(-20),
+                        },
+                    }),
                 });
                 const data = await res.json();
+                if (data.comments) {
+                    data.comments.forEach(c => this.aiLog.push(`  💬 ${c}`));
+                }
                 if (data.commands) {
-                    data.commands.forEach(cmd => this.log.push(`> ${cmd}`));
+                    data.commands.forEach(cmd => this.aiLog.push(`  > ${cmd}`));
                 }
                 if (data.output) {
-                    data.output.forEach(line => this.log.push(line));
+                    data.output.forEach(line => this.aiLog.push(line));
                 }
                 if (data.detail) {
-                    this.log.push(`Error: ${data.detail}`);
+                    this.aiLog.push(`Error: ${data.detail}`);
                 }
             } catch (err) {
-                this.log.push(`Error: ${err.message}`);
+                this.aiLog.push(`Error: ${err.message}`);
             }
             this.aiLoading = false;
             this.aiInput = '';
-            this.scrollLog();
+            this.scrollAiLog();
         },
 
         async saveSession() {
@@ -260,8 +356,26 @@ function sequencer() {
         },
 
         scrollLog() {
+            // Cap log size and persist
+            if (this.log.length > 500) {
+                this.log = this.log.slice(-500);
+            }
+            localStorage.setItem('log', JSON.stringify(this.log));
             this.$nextTick(() => {
                 const container = this.$refs.logContainer;
+                if (container) {
+                    container.scrollTop = container.scrollHeight;
+                }
+            });
+        },
+
+        scrollAiLog() {
+            if (this.aiLog.length > 500) {
+                this.aiLog = this.aiLog.slice(-500);
+            }
+            localStorage.setItem('aiLog', JSON.stringify(this.aiLog));
+            this.$nextTick(() => {
+                const container = this.$refs.aiLogContainer;
                 if (container) {
                     container.scrollTop = container.scrollHeight;
                 }
@@ -303,7 +417,8 @@ function sequencer() {
                     parts.push(g.pattern + ': ' + strs.join(', '));
                 }
             }
-            const line = String(step).padStart(3) + ' │ ' + parts.join('  ·  ');
+            const stepLabel = step < 0 ? '  ·' : String(step).padStart(3);
+            const line = stepLabel + ' │ ' + parts.join('  ·  ');
             this.midiLog.push(line);
             if (this.midiLog.length > this.midiLogMax) {
                 this.midiLog = this.midiLog.slice(-this.midiLogMax);
@@ -325,6 +440,43 @@ function sequencer() {
                     el.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
                 }
             });
+        },
+
+        selectPattern(name) {
+            this.selectedPattern = name;
+            this.scrollToPattern(name);
+        },
+
+        scrollUp() {
+            if (this.scrollIndex > 0) this.scrollIndex--;
+        },
+
+        scrollDown() {
+            if (this.scrollIndex < this.patternNames.length - 1) this.scrollIndex++;
+        },
+
+        scrollToPattern(name) {
+            const idx = this.patternNames.indexOf(name);
+            if (idx >= 0) this.scrollIndex = idx;
+        },
+
+        get visiblePatterns() {
+            return this.patternNames.slice(this.scrollIndex);
+        },
+
+        get selectedPatternData() {
+            if (!this.selectedPattern || !this.patterns[this.selectedPattern]) return null;
+            return this.patterns[this.selectedPattern];
+        },
+
+        getStepDensity(pat) {
+            if (!pat) return [];
+            const result = [];
+            for (let s = 0; s < pat.steps; s++) {
+                const stepData = pat.data[String(s)];
+                result.push(stepData && stepData.length > 0);
+            }
+            return result;
         },
 
         togglePattern(name) {
@@ -376,7 +528,7 @@ function sequencer() {
         },
 
         noteLabelFor(midi, channel) {
-            if (channel === 9) return this.drumName(midi);
+            if (channel === 9) return this.drumName(midi) + ' ' + this.noteName(midi);
             return this.noteName(midi);
         },
 

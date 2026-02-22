@@ -24,13 +24,13 @@ body {
 }
 
 main {
-    max-width: 960px;
     margin: 0 auto;
     padding: 1rem;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
 }
 
 /* ── Transport Bar ────────────────────────────────────── */
@@ -122,33 +122,196 @@ main {
     font-family: monospace;
 }
 
-/* ── Pattern Sections ─────────────────────────────────── */
-.patterns-container {
+/* ── Split Layout ─────────────────────────────────────── */
+.split-container {
+    display: flex;
+    flex: 1;
+    gap: 0.5rem;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.overview-panel {
+    width: 260px;
+    min-width: 260px;
     display: flex;
     flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.panel-title {
+    font-family: monospace;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #666;
+    padding: 0.3rem 0.5rem;
+}
+
+.pattern-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.pattern-list-item {
+    background: #1a1a2e;
+    border: 1px solid #2a2a3e;
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    user-select: none;
+    transition: all 0.15s;
+}
+
+.pattern-list-item.selected {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+}
+
+.pattern-list-item.muted {
+    opacity: 0.5;
+}
+
+.pattern-list-item.selected.muted {
+    opacity: 0.7;
+}
+
+.pattern-list-header {
+    display: flex;
+    align-items: center;
     gap: 0.4rem;
 }
 
-.pattern-section {
-    display: flex;
-    flex-direction: column;
+.pattern-name {
+    font-family: monospace;
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--filled);
 }
 
-.pattern-header {
+.pattern-info {
+    font-family: monospace;
+    font-size: 0.7rem;
+    color: #666;
+    margin-left: auto;
+}
+
+.pattern-muted {
+    font-family: monospace;
+    font-size: 0.65rem;
+    color: #ef4444;
+    font-weight: 600;
+}
+
+.pattern-hint {
+    font-size: 0.8rem;
+    opacity: 0.4;
+    padding: 0.3rem 0.5rem;
+}
+
+/* ── Density Bar ──────────────────────────────────────── */
+.density-bar {
+    display: flex;
+    gap: 1px;
+    height: 6px;
+    margin-top: 0.3rem;
+}
+
+.density-cell {
+    flex: 1;
+    min-width: 2px;
+    background: #2a2a3e;
+    border-radius: 1px;
+}
+
+.density-cell.filled {
+    background: var(--filled);
+    opacity: 0.7;
+}
+
+.density-cell.playhead {
+    background: #facc15;
+    opacity: 1;
+}
+
+.density-cell.playhead.filled {
+    background: #facc15;
+    opacity: 1;
+}
+
+/* ── Detail Panel ────────────────────────────────────── */
+.detail-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    gap: 0.5rem;
+}
+
+.detail-stack {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.detail-pattern-block {
+    flex-shrink: 0;
+    border: 1px solid #2a2a3e;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.detail-pattern-block.selected {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+}
+
+.detail-header {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     padding: 0.4rem 0.7rem;
     background: #1a1a2e;
-    border: 1px solid #2a2a3e;
-    border-radius: 6px 6px 0 0;
-    cursor: pointer;
-    user-select: none;
-    transition: background 0.15s;
 }
 
-.pattern-header:hover {
-    background: #252540;
+.detail-pattern-block .grid-container {
+    border-radius: 0;
+    border-top: 1px solid #2a2a3e;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+}
+
+.detail-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+    opacity: 0.4;
+}
+
+.detail-empty-text {
+    font-size: 1rem;
+    margin-bottom: 0.3rem;
+}
+
+.detail-empty-hint {
+    font-size: 0.8rem;
+}
+
+.detail-empty code {
+    background: #222;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
 }
 
 .collapse-icon {
@@ -156,37 +319,6 @@ main {
     color: #777;
     width: 1rem;
     text-align: center;
-}
-
-.pattern-name {
-    font-family: monospace;
-    font-weight: 600;
-    font-size: 0.9rem;
-    color: var(--filled);
-}
-
-.pattern-info {
-    font-family: monospace;
-    font-size: 0.75rem;
-    color: #666;
-}
-
-.pattern-muted {
-    font-family: monospace;
-    font-size: 0.7rem;
-    color: #ef4444;
-    margin-left: auto;
-}
-
-.pattern-hint {
-    font-size: 0.8rem;
-    opacity: 0.4;
-    padding: 0.3rem 0;
-}
-
-.pattern-section .grid-container {
-    border-radius: 0 0 8px 8px;
-    border-top: none;
 }
 
 /* ── Pattern Grid ─────────────────────────────────────── */
@@ -318,6 +450,7 @@ main {
     background: #111118;
     border: 1px solid #2a2a3e;
     border-radius: 8px;
+    flex-shrink: 0;
 }
 
 .midi-monitor-header {
@@ -388,14 +521,49 @@ main {
     border-radius: 3px;
 }
 
+/* ── Log Tabs ────────────────────────────────────────── */
+.log-tabs {
+    display: flex;
+    gap: 0;
+    flex-shrink: 0;
+}
+
+.log-tab {
+    font-family: monospace;
+    font-size: 0.75rem;
+    padding: 0.3rem 0.8rem;
+    cursor: pointer;
+    color: #666;
+    background: transparent;
+    border: 1px solid #2a2a3e;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    user-select: none;
+    transition: all 0.15s;
+}
+
+.log-tab:hover {
+    color: #999;
+}
+
+.log-tab.active {
+    color: var(--filled);
+    background: var(--log-bg);
+    border-color: #2a2a3e;
+}
+
+.log-container.log-tabbed {
+    border-radius: 0 0 8px 8px;
+    border-top: none;
+}
+
 /* ── Command Log ──────────────────────────────────────── */
 .log-container {
     background: var(--log-bg);
     border: 1px solid #2a2a3e;
     border-radius: 8px;
     padding: 0.6rem 0.8rem;
-    max-height: 180px;
-    min-height: 60px;
+    height: 120px;
     overflow-y: auto;
     font-family: monospace;
     font-size: 0.8rem;
@@ -418,12 +586,14 @@ main {
 .input-row {
     display: flex;
     gap: 0.5rem;
+    flex-shrink: 0;
 }
 
 .command-hint {
     font-family: monospace;
     font-size: 0.75rem;
     color: #666;
+    flex-shrink: 0;
     padding: 0.15rem 0.7rem;
     min-height: 1.2em;
 }
@@ -475,24 +645,57 @@ main {
     50% { opacity: 0.8; }
 }
 
+/* ── Shortcut Bar ────────────────────────────────────── */
+.shortcut-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    padding: 0.3rem 1rem;
+    font-family: monospace;
+    font-size: 0.7rem;
+    color: #555;
+    flex-shrink: 0;
+    border-top: 1px solid #2a2a3e;
+    background: #0d0d14;
+}
+
+.shortcut-item {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.shortcut-item kbd {
+    color: #888;
+    background: #1a1a2e;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    border: 1px solid #2a2a3e;
+    font-size: 0.65rem;
+}
+
 /* ── Scrollbar ────────────────────────────────────────── */
+.pattern-list::-webkit-scrollbar,
 .log-container::-webkit-scrollbar,
 .grid-scroll::-webkit-scrollbar {
     width: 6px;
     height: 6px;
 }
 
+.pattern-list::-webkit-scrollbar-track,
 .log-container::-webkit-scrollbar-track,
 .grid-scroll::-webkit-scrollbar-track {
     background: transparent;
 }
 
+.pattern-list::-webkit-scrollbar-thumb,
 .log-container::-webkit-scrollbar-thumb,
 .grid-scroll::-webkit-scrollbar-thumb {
     background: #333;
     border-radius: 3px;
 }
 
+.pattern-list::-webkit-scrollbar-thumb:hover,
 .log-container::-webkit-scrollbar-thumb:hover,
 .grid-scroll::-webkit-scrollbar-thumb:hover {
     background: #555;
@@ -590,7 +793,18 @@ main {
 }
 
 /* ── Responsive ───────────────────────────────────────── */
-@media (max-width: 600px) {
+@media (max-width: 700px) {
+    .split-container {
+        flex-direction: column;
+    }
+
+    .overview-panel {
+        width: 100%;
+        min-width: 0;
+        max-height: 140px;
+        order: -1;
+    }
+
     .input-row {
         flex-direction: column;
     }

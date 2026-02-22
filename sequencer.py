@@ -420,6 +420,93 @@ class Sequencer:
         }
         return state
 
+    def describe(self) -> str:
+        """Return a compact human-readable description of the full song state."""
+        lines = []
+        status = "playing" if self.playing else "stopped"
+        lines.append(f"BPM: {self.bpm}  Status: {status}")
+        lines.append(f"Patterns: {len(self.patterns)}")
+        lines.append("")
+
+        if not self.patterns:
+            lines.append("(no patterns)")
+            return "\n".join(lines)
+
+        # Build reverse drum map for channel 9 labels
+        reverse_drums = {v: k for k, v in DRUM_MAP.items()}
+
+        for pat in self.patterns.values():
+            muted = " [MUTED]" if pat.muted else ""
+            swing_info = f" swing={pat.swing}%" if pat.swing else ""
+            lines.append(
+                f'Pattern "{pat.name}" (ch={pat.channel}, {pat.steps} steps{muted}{swing_info}):'
+            )
+
+            # Collect all notes used
+            all_notes: set[int] = set()
+            for step_notes in pat.data.values():
+                for n, _v, _g in step_notes:
+                    all_notes.add(n)
+
+            if not all_notes:
+                lines.append("  (empty)")
+            else:
+                for note in sorted(all_notes):
+                    # Label: drum name for ch9, note name otherwise
+                    if pat.channel == 9 and note in reverse_drums:
+                        label = f"{reverse_drums[note]}({note})"
+                    else:
+                        label = f"{midi_to_note_name(note)}({note})"
+
+                    # Collect steps, velocities, gates for this note
+                    hits = []
+                    for step in sorted(pat.data.keys()):
+                        for n, v, g in pat.data[step]:
+                            if n == note:
+                                hits.append((step, v, g))
+
+                    steps = [h[0] for h in hits]
+                    vels = {h[1] for h in hits}
+                    gates = {h[2] for h in hits}
+
+                    # Compact: show vel/gate only if non-default or mixed
+                    suffix = ""
+                    if len(vels) == 1:
+                        v = next(iter(vels))
+                        if v != 100:
+                            suffix += f" v{v}"
+                    else:
+                        suffix += f" v[{','.join(str(v) for v in sorted(vels))}]"
+
+                    if len(gates) == 1:
+                        g = next(iter(gates))
+                        if g != 1:
+                            suffix += f" g{g}"
+                    else:
+                        suffix += f" g[{','.join(str(g) for g in sorted(gates))}]"
+
+                    # Per-note swing
+                    if note in pat.swing_notes:
+                        suffix += f" sw{pat.swing_notes[note]}%"
+
+                    # Muted note
+                    if note in pat.muted_notes:
+                        suffix += " [muted]"
+
+                    lines.append(f"  {label:>14s}: [{','.join(str(s) for s in steps)}]{suffix}")
+
+            # CC automation summary
+            if pat.cc_auto:
+                for cc_num in sorted(pat.cc_auto):
+                    mode = pat.cc_interp.get(cc_num, "linear")
+                    kf = pat.cc_auto[cc_num]
+                    kf_str = " ".join(f"{s}:{v}" for s, v in sorted(kf.items()))
+                    lines.append(f"  CC{cc_num} ({mode}): {kf_str}")
+
+            lines.append("")
+
+        return "\n".join(lines)
+
     def save(self, filepath: str):
         data = {
             "bpm": self.bpm,
@@ -532,6 +619,8 @@ class ChatInterface:
     and translate natural language → these commands.
     """
 
+    _META_COMMANDS = {"undo", "redo", "history"}
+
     def __init__(self):
         self.seq = Sequencer()
         self._output: list[str] = []
@@ -544,12 +633,30 @@ class ChatInterface:
         # Macros
         self._macros: dict[str, Macro] = {}
         self._load_global_macros()
+        # Undo/redo and history
+        self._history: list[tuple[int, str]] = []  # (id, command_line)
+        self._next_id: int = 1
+        self._undo_stack: list[tuple[int, dict]] = []  # (history_id, state_snapshot)
+        self._redo_stack: list[tuple[int, dict]] = []
+        self._clipboard: list[str] = []
+        self._max_undo: int = 100
 
     def _emit(self, text: str):
         self._output.append(text)
 
     def _notify_state(self):
         self.seq._notify(self.seq.get_state())
+
+    def _snapshot(self) -> dict:
+        """Capture current sequencer state for undo."""
+        return self.seq.get_state()
+
+    def _restore(self, snapshot: dict):
+        """Restore sequencer state from a snapshot."""
+        self.seq.bpm = snapshot["bpm"]
+        self.seq.patterns.clear()
+        for name, pat_dict in snapshot["patterns"].items():
+            self.seq.patterns[name] = Pattern.from_dict(pat_dict)
 
     # ── Macro helpers ────────────────────────────────────────────────────
 
@@ -690,6 +797,7 @@ class ChatInterface:
         ch = int(parts[2]) if len(parts) > 2 else 0
         self.seq.patterns[name] = Pattern(name, steps, ch)
         self._emit(f"  ✓ Created pattern '{name}' ({steps} steps, channel {ch})")
+        self.seq._notify({"type": "ui", "select": name})
 
     @command("list", "patterns", "show all patterns")
     def cmd_list(self, args: str):
@@ -1240,6 +1348,16 @@ class ChatInterface:
             args=(mido.Message("note_off", note=note, channel=ch, velocity=0),),
         ).start()
         self._emit(f"  ✓ {midi_to_note_name(note)} v{vel} ch{ch}")
+        self.seq._notify(
+            {
+                "type": "midi_out",
+                "pattern": "tap",
+                "step": -1,
+                "notes": [
+                    {"note": note, "name": midi_to_note_name(note), "vel": vel, "gate": 1, "ch": ch}
+                ],
+            }
+        )
 
     # ── Macros ────────────────────────────────────────────────────────────
 
@@ -1428,6 +1546,121 @@ class ChatInterface:
 
     # ── Plugins ───────────────────────────────────────────────────────────
 
+    # ── Undo / Redo / History ────────────────────────────────────────────
+
+    @command("undo", "other", "undo last command")
+    def cmd_undo(self, args: str):
+        if not self._undo_stack:
+            self._emit("  Nothing to undo")
+            return
+        hist_id, snapshot = self._undo_stack.pop()
+        self._redo_stack.append((hist_id, self._snapshot()))
+        self._restore(snapshot)
+        self._emit(f"  ✓ Undid command #{hist_id}")
+
+    @command("redo", "other", "redo last undone command")
+    def cmd_redo(self, args: str):
+        if not self._redo_stack:
+            self._emit("  Nothing to redo")
+            return
+        hist_id, snapshot = self._redo_stack.pop()
+        self._undo_stack.append((hist_id, self._snapshot()))
+        self._restore(snapshot)
+        self._emit(f"  ✓ Redid command #{hist_id}")
+
+    @command(
+        "history",
+        "other",
+        "view/edit command history",
+        usage="history <view|delete|copy|paste> [args]",
+        hint_args=["<subcommand>", "[args]"],
+    )
+    def cmd_history(self, args: str):
+        if not args:
+            self._emit("Usage: history <view|delete|copy|paste> [args]")
+            return
+        sub, _, rest = args.partition(" ")
+        sub = sub.lower()
+        rest = rest.strip()
+
+        if sub == "view":
+            self._history_view(rest)
+        elif sub == "delete":
+            self._history_delete(rest)
+        elif sub == "copy":
+            self._history_copy(rest)
+        elif sub == "paste":
+            self._history_paste(rest)
+        else:
+            self._emit(f"  Unknown history subcommand: {sub}")
+
+    def _parse_history_range(self, spec: str) -> list[int]:
+        """Parse a history ID or range (e.g. '5' or '3-7') into list of IDs."""
+        spec = spec.strip()
+        if "-" in spec:
+            match = re.match(r"(\d+)-(\d+)", spec)
+            if match:
+                return list(range(int(match.group(1)), int(match.group(2)) + 1))
+        elif spec.isdigit():
+            return [int(spec)]
+        return []
+
+    def _history_view(self, rest: str):
+        if not self._history:
+            self._emit("  No command history")
+            return
+        if not rest:
+            for hid, line in self._history:
+                self._emit(f"  #{hid} {line}")
+        else:
+            ids = set(self._parse_history_range(rest))
+            found = False
+            for hid, line in self._history:
+                if hid in ids:
+                    self._emit(f"  #{hid} {line}")
+                    found = True
+            if not found:
+                self._emit(f"  No history entries matching '{rest}'")
+
+    def _history_delete(self, rest: str):
+        if not rest:
+            self._emit("Usage: history delete <id|range>")
+            return
+        ids = set(self._parse_history_range(rest))
+        before = len(self._history)
+        self._history = [(hid, line) for hid, line in self._history if hid not in ids]
+        removed = before - len(self._history)
+        if removed:
+            self._emit(f"  ✓ Deleted {removed} history entry(ies)")
+        else:
+            self._emit(f"  No history entries matching '{rest}'")
+
+    def _history_copy(self, rest: str):
+        if not rest:
+            self._emit("Usage: history copy <id|range>")
+            return
+        ids = self._parse_history_range(rest)
+        id_set = set(ids)
+        commands = [line for hid, line in self._history if hid in id_set]
+        if commands:
+            self._clipboard = commands
+            self._emit(f"  ✓ Copied {len(commands)} command(s) to clipboard")
+        else:
+            self._emit(f"  No history entries matching '{rest}'")
+
+    def _history_paste(self, rest: str):
+        if not rest:
+            self._emit("Usage: history paste <after_id>")
+            return
+        if not self._clipboard:
+            self._emit("  Clipboard is empty")
+            return
+        self._emit(f"  ▶ Pasting {len(self._clipboard)} command(s)")
+        for cmd_line in self._clipboard:
+            self._emit(f"  > {cmd_line}")
+            _, out = self.handle(cmd_line)
+            self._output.extend(out)
+
     # ── Other ─────────────────────────────────────────────────────────────
 
     @command("drums", "other", "show drum name → note mapping")
@@ -1482,6 +1715,16 @@ class ChatInterface:
                 return
             DRUM_MAP[name] = note
             self._emit(f"  ✓ {name} → {note} ({midi_to_note_name(note)})")
+
+    @command("describe", "other", "show compact song overview")
+    def cmd_describe(self, args: str):
+        self._emit(self.seq.describe())
+
+    @command("dump", "other", "show full song state as JSON")
+    def cmd_dump(self, args: str):
+        state = self.seq.get_state()
+        state.pop("type", None)
+        self._emit(json.dumps(state, indent=2))
 
     @command("save", "other", "save session", usage="save [file]", hint_args=["[file.json]"])
     def cmd_save(self, args: str):
@@ -1540,6 +1783,31 @@ class ChatInterface:
         self._emit(f"  ✓ Ran {count} commands from {path}")
 
     @command(
+        "select",
+        "patterns",
+        "switch detail view to named pattern",
+        usage="select <pattern>",
+        hint_args=["<pattern>"],
+    )
+    def cmd_select(self, args: str):
+        if not args:
+            self._emit("Usage: select <pattern>")
+            return
+        if args not in self.seq.patterns:
+            self._emit(f"  Pattern '{args}' not found")
+            return
+        self.seq._notify({"type": "ui", "select": args})
+        self._emit(f"  ✓ Selected '{args}'")
+
+    @command("up", "other", "scroll detail view up")
+    def cmd_up(self, args: str):
+        self.seq._notify({"type": "ui", "scroll": "up"})
+
+    @command("down", "other", "scroll detail view down", aliases=["dn"])
+    def cmd_down(self, args: str):
+        self.seq._notify({"type": "ui", "scroll": "down"})
+
+    @command(
         "fold", "other", "collapse pattern display", usage="fold <pattern>", hint_args=["<pattern>"]
     )
     def cmd_fold(self, args: str):
@@ -1566,6 +1834,33 @@ class ChatInterface:
             self._emit(f"  Pattern '{args}' not found")
             return
         self.seq._notify({"type": "ui", "unfold": args})
+
+    @command("tab", "other", "switch log tab (command/ai)", aliases=["t"])
+    def cmd_tab(self, args: str):
+        target = args.strip().lower() if args.strip() else None
+        self.seq._notify({"type": "ui", "tab": target or "toggle"})
+
+    @command(
+        "width",
+        "other",
+        "set layout width",
+        usage="width <compact|normal|wide|full>",
+        hint_args=["<compact|normal|wide|full>"],
+        aliases=["w"],
+    )
+    def cmd_width(self, args: str):
+        presets = {
+            "compact": "960px",
+            "normal": "1200px",
+            "wide": "1600px",
+            "full": "100%",
+        }
+        label = args.strip().lower()
+        if label not in presets:
+            self._emit(f"  Unknown width '{args}'. Use: compact, normal, wide, full")
+            return
+        self.seq._notify({"type": "ui", "width": presets[label]})
+        self._emit(f"  ✓ Layout width → {label} ({presets[label]})")
 
     @command("midi", "other", "toggle MIDI monitor")
     def cmd_midi(self, args: str):
@@ -1619,7 +1914,32 @@ class ChatInterface:
         cmd = cmd.lower()
         args = args.strip()
 
+        PATTERN_COMMANDS = {
+            "put",
+            "show",
+            "clear",
+            "euclid",
+            "arp",
+            "vel",
+            "remove",
+            "swing",
+            "auto",
+            "replace",
+            "mute",
+            "unmute",
+            "solo",
+            "fold",
+            "unfold",
+            "select",
+        }
+
+        is_meta = cmd in self._META_COMMANDS
+
         try:
+            # Snapshot state before mutating commands
+            if not is_meta:
+                snapshot = self._snapshot()
+
             cmd_def = self._commands.get(cmd)
             if cmd_def is not None:
                 result = getattr(self, cmd_def.handler)(args)
@@ -1629,6 +1949,24 @@ class ChatInterface:
                 self._run_macro(self._macros[cmd], args)
             else:
                 self._emit(f"  Unknown command: {cmd}. Type 'help' for commands.")
+
+            # Record to history and undo stack for non-meta commands
+            if not is_meta:
+                hist_id = self._next_id
+                self._next_id += 1
+                self._history.append((hist_id, line))
+                self._undo_stack.append((hist_id, snapshot))
+                self._redo_stack.clear()
+                # Cap undo stack size
+                if len(self._undo_stack) > self._max_undo:
+                    self._undo_stack = self._undo_stack[-self._max_undo :]
+
+            # Implicit pattern selection for pattern-targeting commands
+            if cmd in PATTERN_COMMANDS and args:
+                pat_name = args.split()[0]
+                if pat_name in self.seq.patterns:
+                    self.seq._notify({"type": "ui", "select": pat_name})
+
             self._notify_state()
         except Exception as e:
             self._emit(f"  Error: {e}")
