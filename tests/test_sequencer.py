@@ -829,6 +829,15 @@ class TestHelp:
         assert any("TRANSPORT" in line for line in out)
         assert any("play" in line.lower() for line in out)
 
+    def test_cls_clears_log(self, chat):
+        run(chat, "new beat 16 9")
+        events = []
+        chat.seq.add_listener(lambda e: events.append(e))
+        out = run(chat, "cls")
+        assert out == []
+        ui_events = [e for e in events if e.get("type") == "ui"]
+        assert any(e.get("clear_log") is True for e in ui_events)
+
     def test_unknown_command(self, chat):
         out = run(chat, "xyzgarbage")
         assert any("Unknown command" in line for line in out)

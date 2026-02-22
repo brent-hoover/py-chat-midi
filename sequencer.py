@@ -2406,6 +2406,10 @@ class ChatInterface:
             self._emit(line)
         self.seq._notify({"type": "ui", "explain": True, "lines": lines})
 
+    @command("cls", "other", "clear the log view")
+    def cmd_cls(self, args: str):
+        self.seq._notify({"type": "ui", "clear_log": True})
+
     @command("help", "other", "toggle help / show commands", aliases=["?"])
     def cmd_help(self, args: str):
         self.seq._notify({"type": "ui", "toggle": "help"})
