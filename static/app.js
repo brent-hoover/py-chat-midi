@@ -19,6 +19,7 @@ function sequencer() {
         showMidi: false,
         macroEditor: { open: false, name: '', commands: '', params: [] },
         octaveOffset: 0,            // 0=Element, -1=Yamaha, -2=Ableton
+        drumMap: {},                // {midi_note: name} from server
         midiLog: [],                // scrolling text MIDI output
         midiLogMax: 200,
         _pendingMidiNotes: [],      // accumulator for current step
@@ -84,6 +85,7 @@ function sequencer() {
                 this.bpm = msg.bpm;
                 this.playing = msg.playing;
                 if (msg.octave_offset !== undefined) this.octaveOffset = msg.octave_offset;
+                if (msg.drum_map) this.drumMap = msg.drum_map;
                 // Clear stale selection if pattern was deleted
                 if (this.selectedPattern && !this.patterns[this.selectedPattern]) {
                     this.selectedPattern = null;
@@ -224,6 +226,10 @@ function sequencer() {
                 const idx = parseInt(event.code.slice(-1)) - 1;
                 this.setLayoutWidth(this.layoutPresets[idx].value);
             }
+            if (event.key === '?' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+                event.preventDefault();
+                this.sendCommand('help');
+            }
         },
 
         switchTab(target) {
@@ -255,6 +261,7 @@ function sequencer() {
                 { keys: 'Ctrl+Space', label: 'Play/Stop' },
                 { keys: 'Ctrl+`', label: 'Switch Tab' },
                 { keys: 'Ctrl+1-4', label: 'Width' },
+                { keys: '?', label: 'Help' },
             ];
         },
 
@@ -541,12 +548,7 @@ function sequencer() {
         },
 
         drumName(midi) {
-            const map = {
-                36: 'kick', 37: 'rimshot', 38: 'snare', 39: 'clap',
-                42: 'hihat', 43: 'tom3', 45: 'tom2', 46: 'ohh',
-                48: 'tom1', 49: 'crash', 51: 'ride', 56: 'cowbell'
-            };
-            return map[midi] || this.noteName(midi);
+            return this.drumMap[midi] || this.noteName(midi);
         },
 
         noteLabelFor(midi, channel) {
