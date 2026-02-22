@@ -16,13 +16,18 @@ function sequencer() {
         collapsedPatterns: {},
         scrollIndex: 0,
         showHelp: false,
+        showQuickStart: false,
         showMidi: false,
+        showExplain: false,
+        explainLines: [],
+        explainPage: 0,
+        explainPageSize: 20,
         macroEditor: { open: false, name: '', commands: '', params: [] },
-        octaveOffset: 0,            // 0=Element, -1=Yamaha, -2=Ableton
-        drumMap: {},                // {midi_note: name} from server
-        midiLog: [],                // scrolling text MIDI output
+        octaveOffset: 0, // 0=Element, -1=Yamaha, -2=Ableton
+        drumMap: {}, // {midi_note: name} from server
+        midiLog: [], // scrolling text MIDI output
         midiLogMax: 200,
-        _pendingMidiNotes: [],      // accumulator for current step
+        _pendingMidiNotes: [], // accumulator for current step
         layoutWidth: localStorage.getItem('layoutWidth') || 'none',
         layoutPresets: [
             { label: 'Compact', value: '960px' },
@@ -67,14 +72,14 @@ function sequencer() {
                 this.hints = {};
                 for (const cmd of data) {
                     this.commands.push(cmd.name);
-                    for (const alias of (cmd.aliases || [])) {
+                    for (const alias of cmd.aliases || []) {
                         this.commands.push(alias);
                     }
                     if (cmd.hint_args && cmd.hint_args.length > 0) {
                         this.hints[cmd.name] = [cmd.name, ...cmd.hint_args];
                     }
                 }
-            } catch (err) {
+            } catch (_err) {
                 // Fallback: commands will be empty until server responds
             }
         },
@@ -121,7 +126,10 @@ function sequencer() {
                 if (msg.scroll === 'up') this.scrollUp();
                 if (msg.scroll === 'down') this.scrollDown();
                 if (msg.toggle === 'midi') this.toggleMidiMonitor();
-                if (msg.toggle === 'help') this.showHelp = !this.showHelp;
+                if (msg.toggle === 'help') {
+                    this.showHelp = !this.showHelp;
+                    this.showQuickStart = false;
+                }
                 if (msg.fold) this.collapsedPatterns[msg.fold] = true;
                 if (msg.unfold) this.collapsedPatterns[msg.unfold] = false;
                 if (msg.macro_edit) {
@@ -136,6 +144,11 @@ function sequencer() {
                 if (msg.width) this.setLayoutWidth(msg.width);
                 if (msg.macro_saved) {
                     this.macroEditor.open = false;
+                }
+                if (msg.explain) {
+                    this.explainLines = msg.lines || [];
+                    this.explainPage = 0;
+                    this.showExplain = true;
                 }
                 if (msg.clear_log) {
                     this.log = [];
@@ -157,8 +170,32 @@ function sequencer() {
             }
         },
 
+        dismissExplain() {
+            this.showExplain = false;
+            this.explainLines = [];
+            this.explainPage = 0;
+        },
+
+        get explainTotalPages() {
+            return Math.max(1, Math.ceil(this.explainLines.length / this.explainPageSize));
+        },
+
+        get explainPageLines() {
+            const start = this.explainPage * this.explainPageSize;
+            return this.explainLines.slice(start, start + this.explainPageSize);
+        },
+
+        explainNextPage() {
+            if (this.explainPage < this.explainTotalPages - 1) this.explainPage++;
+        },
+
+        explainPrevPage() {
+            if (this.explainPage > 0) this.explainPage--;
+        },
+
         sendCommand(line) {
             if (!line.trim()) return;
+            this.showExplain = false;
             this.activeTab = 'command';
             this.log.push(`> ${line}`);
             this.scrollLog();
@@ -174,8 +211,18 @@ function sequencer() {
 
         commands: [],
         drumNames: [
-            'kick', 'snare', 'clap', 'hihat', 'ohh', 'tom1', 'tom2', 'tom3',
-            'crash', 'ride', 'cowbell', 'rimshot',
+            'kick',
+            'snare',
+            'clap',
+            'hihat',
+            'ohh',
+            'tom1',
+            'tom2',
+            'tom3',
+            'crash',
+            'ride',
+            'cowbell',
+            'rimshot',
         ],
         hints: {},
 
@@ -213,6 +260,23 @@ function sequencer() {
         },
 
         handleGlobalKeydown(event) {
+            if (this.showExplain) {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    this.dismissExplain();
+                    return;
+                }
+                if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    this.explainNextPage();
+                    return;
+                }
+                if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    this.explainPrevPage();
+                    return;
+                }
+            }
             if (event.ctrlKey && event.key === ' ') {
                 event.preventDefault();
                 this.sendCommand(this.playing ? 'stop' : 'play');
@@ -221,14 +285,26 @@ function sequencer() {
                 event.preventDefault();
                 this.switchTab('toggle');
             }
-            if (event.ctrlKey && ['Digit1','Digit2','Digit3','Digit4'].includes(event.code)) {
+            if (event.ctrlKey && ['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(event.code)) {
                 event.preventDefault();
                 const idx = parseInt(event.code.slice(-1)) - 1;
                 this.setLayoutWidth(this.layoutPresets[idx].value);
             }
-            if (event.key === '?' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+            if (
+                event.key === '?' &&
+                !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)
+            ) {
                 event.preventDefault();
+                this.showQuickStart = false;
                 this.sendCommand('help');
+            }
+            if (
+                event.key === '/' &&
+                !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)
+            ) {
+                event.preventDefault();
+                this.showHelp = false;
+                this.showQuickStart = !this.showQuickStart;
             }
         },
 
@@ -256,11 +332,134 @@ function sequencer() {
             }
         },
 
+        get helpContent() {
+            return [
+                [
+                    {
+                        title: 'Transport',
+                        body:
+                            'play                start playback\n' +
+                            'stop                stop playback\n' +
+                            'bpm <N>             set tempo',
+                    },
+                    {
+                        title: 'Patterns',
+                        body:
+                            'new <name> [steps] [ch]   create pattern\n' +
+                            'list                      show all patterns\n' +
+                            'delete <name>             remove pattern\n' +
+                            'mute <name>               toggle mute',
+                    },
+                    {
+                        title: 'Editing',
+                        body:
+                            'put <pat> <steps> <notes> [vel] [gate]\n' +
+                            'clear <pat> [steps]\n' +
+                            'show <pat>',
+                    },
+                ],
+                [
+                    {
+                        title: 'Generators',
+                        body:
+                            'euclid <pat> <hits> [notes] [vel]\n' +
+                            'arp <pat> <notes> <up|down|updown|random>',
+                    },
+                    {
+                        title: 'MIDI',
+                        body:
+                            'cc <ch> <cc#> <val>   control change\n' +
+                            'pc <ch> <program>     program change\n' +
+                            'panic                 all notes off',
+                    },
+                    {
+                        title: 'Files',
+                        body:
+                            'save [file]           save session JSON\n' +
+                            'load <file>           load session JSON\n' +
+                            'run <file.txt>        run command script',
+                    },
+                    {
+                        title: 'Steps',
+                        body:
+                            '0,4,8,12    individual\n' +
+                            '0-15        range\n' +
+                            '0-15:2      range with stride',
+                    },
+                ],
+            ];
+        },
+
+        get quickStartContent() {
+            const c = '<span class="qs-comment">';
+            const e = '</span>';
+            return [
+                [
+                    {
+                        title: '1. Create a Pattern',
+                        body:
+                            `new drums 16 9       ${c}16 steps, ch 9 (drums)${e}\n` +
+                            `new bass 16 0        ${c}16 steps, ch 0${e}`,
+                    },
+                    {
+                        title: '2. Add Notes',
+                        body:
+                            `put drums 0,4,8,12 kick       ${c}four-on-floor${e}\n` +
+                            `put drums 2,6,10,14 snare     ${c}backbeat${e}\n` +
+                            `put bass 0 C3 100 2           ${c}note vel gate${e}`,
+                    },
+                    {
+                        title: '3. Use Euclidean Rhythms',
+                        body:
+                            `euclid drums 5 hihat          ${c}5 hits spread evenly${e}\n` +
+                            `euclid drums 3 kick 100       ${c}3 hits, vel 100${e}`,
+                    },
+                    {
+                        title: '4. Play & Adjust',
+                        body:
+                            `play                  ${c}start playback${e}\n` +
+                            `bpm 128               ${c}change tempo${e}\n` +
+                            `stop                  ${c}stop playback${e}`,
+                    },
+                ],
+                [
+                    {
+                        title: '5. Shape the Sound',
+                        body:
+                            `volume drums -20      ${c}lower velocity by 20${e}\n` +
+                            `volume bass +50%      ${c}boost velocity 50%${e}\n` +
+                            `swing drums 30        ${c}add swing feel${e}`,
+                    },
+                    {
+                        title: '6. Arpeggios',
+                        body:
+                            `arp bass C3,E3,G3 up          ${c}ascending${e}\n` +
+                            `arp bass C3,E3,G3 updown       ${c}bounce${e}`,
+                    },
+                    {
+                        title: '7. Save & Load',
+                        body:
+                            `save mysong           ${c}save to file${e}\n` +
+                            `load mysong           ${c}restore session${e}`,
+                    },
+                    {
+                        title: 'Tips',
+                        body:
+                            `${c}Space in cmd input = play/stop${e}\n` +
+                            `${c}Tab = autocomplete commands${e}\n` +
+                            `${c}Up/Down = command history${e}\n` +
+                            `${c}Steps: 0,4,8 or 0-15 or 0-15:2${e}`,
+                    },
+                ],
+            ];
+        },
+
         get shortcuts() {
             return [
                 { keys: 'Ctrl+Space', label: 'Play/Stop' },
                 { keys: 'Ctrl+`', label: 'Switch Tab' },
                 { keys: 'Ctrl+1-4', label: 'Width' },
+                { keys: '/', label: 'Quick Start' },
                 { keys: '?', label: 'Help' },
             ];
         },
@@ -273,13 +472,13 @@ function sequencer() {
 
             let candidates = [];
             if (isFirstWord) {
-                candidates = this.commands.filter(c => c.startsWith(partial));
+                candidates = this.commands.filter((c) => c.startsWith(partial));
             } else {
                 // Complete pattern names, then drum names
                 const patNames = Object.keys(this.patterns);
-                candidates = patNames.filter(n => n.toLowerCase().startsWith(partial));
+                candidates = patNames.filter((n) => n.toLowerCase().startsWith(partial));
                 if (candidates.length === 0) {
-                    candidates = this.drumNames.filter(n => n.startsWith(partial));
+                    candidates = this.drumNames.filter((n) => n.startsWith(partial));
                 }
             }
 
@@ -324,13 +523,13 @@ function sequencer() {
                 });
                 const data = await res.json();
                 if (data.comments) {
-                    data.comments.forEach(c => this.aiLog.push(`  💬 ${c}`));
+                    data.comments.forEach((c) => this.aiLog.push(`  💬 ${c}`));
                 }
                 if (data.commands) {
-                    data.commands.forEach(cmd => this.aiLog.push(`  > ${cmd}`));
+                    data.commands.forEach((cmd) => this.aiLog.push(`  > ${cmd}`));
                 }
                 if (data.output) {
-                    data.output.forEach(line => this.aiLog.push(line));
+                    data.output.forEach((line) => this.aiLog.push(line));
                 }
                 if (data.detail) {
                     this.aiLog.push(`Error: ${data.detail}`);
@@ -347,7 +546,9 @@ function sequencer() {
             try {
                 const res = await fetch('/api/session');
                 const data = await res.json();
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const blob = new Blob([JSON.stringify(data, null, 2)], {
+                    type: 'application/json',
+                });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
@@ -367,7 +568,7 @@ function sequencer() {
             if (!file) return;
             try {
                 const text = await file.text();
-                const data = JSON.parse(text);
+                JSON.parse(text); // validate JSON before sending
                 const res = await fetch('/api/session', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -439,7 +640,7 @@ function sequencer() {
                     strs.push(s);
                 }
                 // CC info
-                for (const c of (g.cc || [])) {
+                for (const c of g.cc || []) {
                     strs.push('CC' + c.cc + '=' + c.value);
                 }
                 if (strs.length > 0) {
@@ -513,12 +714,14 @@ function sequencer() {
         },
 
         saveMacro() {
-            const commands = this.macroEditor.commands.split('\n').filter(l => l.trim());
-            this.ws.send(JSON.stringify({
-                type: 'macro_save',
-                name: this.macroEditor.name,
-                commands,
-            }));
+            const commands = this.macroEditor.commands.split('\n').filter((l) => l.trim());
+            this.ws.send(
+                JSON.stringify({
+                    type: 'macro_save',
+                    name: this.macroEditor.name,
+                    commands,
+                }),
+            );
         },
 
         cancelMacroEdit() {
@@ -593,7 +796,7 @@ function sequencer() {
             const schema = this.hints[cmd];
             if (!schema) {
                 if (argc === 0) {
-                    const matches = Object.keys(this.hints).filter(c => c.startsWith(cmd));
+                    const matches = Object.keys(this.hints).filter((c) => c.startsWith(cmd));
                     if (matches.length > 0 && matches.length <= 5) {
                         return matches.join('  ');
                     }

@@ -663,6 +663,311 @@ class CommandDef:
 
 _command_registry: list[CommandDef] = []
 
+_COMMAND_DETAILS: dict[str, str] = {
+    "put": """\
+Set notes at specific steps in a pattern.
+
+Usage: put <pattern> <steps> <notes> [velocity] [gate]
+
+Steps:   0,4,8     individual steps
+         0-15      range (inclusive)
+         0-15:2    range with stride (every 2nd step)
+
+Notes:   C3        note name + octave
+         kick      drum name (ch 9 only)
+         60        raw MIDI number
+         C3,E3,G3  multiple notes (chord)
+
+Velocity: 1-127 (default 100)
+Gate:     duration in steps (default 1)
+
+Examples:
+  put drums 0,4,8,12 kick           four-on-floor kick
+  put drums 2,6,10,14 snare 80      snare at velocity 80
+  put bass 0 C3 100 2               C3, vel 100, gate 2 steps
+  put keys 0-7 C3,E3,G3             chord across 8 steps
+  put drums 0-15:2 hihat 60         hihat on even steps""",
+    "euclid": """\
+Generate a Euclidean rhythm — evenly distributing hits across the pattern.
+
+Usage: euclid <pattern> <hits> [notes] [velocity]
+
+The Bjorklund algorithm spaces N hits as evenly as possible across
+the pattern's total steps. Clears the pattern first.
+
+Common rhythms:
+  euclid drums 4     →  4 hits in 16 steps = kick on 0,4,8,12
+  euclid drums 3     →  3 hits in 16 steps = tresillo
+  euclid drums 5     →  5 in 8 = classic clave feel (if 8-step pattern)
+  euclid drums 7     →  7 in 16 = West African bell pattern
+
+Examples:
+  euclid drums 4 kick              four-on-floor kick
+  euclid hihat 7 hihat 80          hihat Euclidean at vel 80
+  euclid perc 3 C3,E3              chord hits, tresillo spacing""",
+    "arp": """\
+Fill a pattern with an arpeggiated note sequence. Clears the pattern first.
+
+Usage: arp <pattern> <notes> <style>
+
+Styles:
+  up       — ascending through notes, repeating
+  down     — descending through notes, repeating
+  updown   — ascending then descending (ping-pong)
+  random   — randomized order
+
+Notes are comma-separated: C3,E3,G3,C4
+
+Examples:
+  arp keys C3,E3,G3 up             ascending triad
+  arp bass C2,G2,C3,G3 updown      bass arpeggio ping-pong
+  arp lead D3,F#3,A3,D4 random     random arp""",
+    "clear": """\
+Clear all notes from a pattern, or just specific steps.
+
+Usage: clear <pattern> [steps]
+
+Without steps: clears the entire pattern (all notes, all steps).
+With steps:    clears only the specified steps.
+
+Step syntax: same as put (0,4,8 / 0-15 / 0-15:2)
+
+Examples:
+  clear drums             wipe entire drum pattern
+  clear bass 0-3          clear first 4 steps of bass
+  clear keys 0,4,8        clear specific steps""",
+    "new": """\
+Create a new pattern.
+
+Usage: new <name> [steps] [channel]
+
+  name     — unique pattern name (no spaces)
+  steps    — number of steps (default 16)
+  channel  — MIDI channel 0-15 (default 0, use 9 for drums)
+
+Channel 9 is the GM drum channel. When channel is 9, drum names
+(kick, snare, hihat, etc.) can be used in put/euclid commands.
+
+Examples:
+  new drums 16 9          16-step drum pattern on ch 9
+  new bass                16-step pattern on ch 0
+  new lead 32 1           32-step pattern on ch 1
+  new hihat 8 9           8-step drum pattern""",
+    "volume": """\
+Adjust velocity of all hits in a pattern.
+
+Usage: volume <pattern> <+/-N or +/-N%>
+
+Absolute offset: +10, -20 — adds/subtracts from each velocity.
+Percentage:      +50%, -25% — scales each velocity by that amount.
+
+Velocities are clamped to 1-127.
+
+Examples:
+  volume drums +10        boost all drum hits by 10
+  volume bass -20         reduce bass velocity by 20
+  volume keys +50%        scale keys up by 50% (100 → 150 → clamped to 127)
+  volume drums -25%       reduce drums by 25% (100 → 75)
+
+Alias: vol""",
+    "swing": """\
+Add swing (timing offset) to a pattern or specific note.
+
+Usage: swing <pattern> <0-100> [note]
+
+Swing delays even-numbered steps. 0 = no swing (straight),
+50 = moderate shuffle, 100 = maximum swing (triplet feel).
+
+Without note: applies to entire pattern.
+With note:    per-note swing (e.g., different swing for hihat vs kick).
+
+Examples:
+  swing drums 50          moderate shuffle on all drums
+  swing drums 60 hihat    extra swing on hihat only
+  swing drums 0 hihat     remove per-note swing from hihat""",
+    "vel": """\
+Change the velocity of existing hits at specific steps.
+
+Usage: vel <pattern> <steps> <note> <velocity>
+
+Only modifies hits that already exist — does not create new ones.
+
+Examples:
+  vel drums 0,8 kick 127      accent kick on beats 1 and 3
+  vel drums 4,12 snare 60     ghost snare on beats 2 and 4
+  vel bass 0-15 C3 80         set all C3 hits to vel 80""",
+    "remove": """\
+Remove a specific note from steps in a pattern.
+
+Usage: remove <pattern> <steps> <note>
+
+Unlike clear (which removes all notes from a step), remove targets
+a specific note and leaves other notes on those steps intact.
+
+Examples:
+  remove drums 0,4 kick       remove kick from steps 0 and 4
+  remove keys 0-7 E3          remove E3 from first 8 steps
+  remove drums 0-15 hihat     remove all hihat hits""",
+    "replace": """\
+Swap one note for another across an entire pattern.
+
+Usage: replace <pattern> <old_note> <new_note>
+
+Preserves velocity and gate of each hit. Useful for changing
+drum sounds or transposing a single note.
+
+Examples:
+  replace drums kick tom1      swap kick for tom1
+  replace bass C3 D3           transpose C3 to D3
+  replace drums hihat ohh      open hihat instead of closed""",
+    "auto": """\
+Set CC automation keyframes on a pattern.
+
+Usage:
+  auto <pattern> cc<N> <step:val ...>     set keyframes
+  auto <pattern> cc<N> interp <mode>      set interpolation
+  auto <pattern> cc<N> clear              remove automation
+  auto <pattern> list                     show all CC lanes
+
+Keyframes are step:value pairs (value 0-127).
+Interpolation modes: linear (smooth), step (jump), exp (exponential).
+
+Examples:
+  auto bass cc74 0:0 8:127 15:0       filter sweep
+  auto bass cc74 interp exp           exponential curve
+  auto pad cc1 0:0 4:64 8:127         mod wheel ramp
+  auto drums list                     show drum CC lanes""",
+    "mute": """\
+Toggle mute on a pattern or a specific note within a pattern.
+
+Usage: mute <pattern> [note]
+
+Without note: mutes/unmutes the entire pattern.
+With note:    mutes/unmutes just that note (other notes still play).
+
+Examples:
+  mute drums          toggle mute on entire drum pattern
+  mute drums hihat    mute just the hihat
+  mute drums hihat    (again) unmute the hihat""",
+    "solo": """\
+Solo a pattern or specific note — mute everything else.
+
+Usage: solo <pattern> [note]
+
+Without note: mutes all other patterns, unmutes this one.
+              Running solo again on the same pattern un-solos.
+With note:    mutes all other notes in the pattern.
+
+Examples:
+  solo bass             hear only the bass
+  solo bass             (again) un-solo, unmute all
+  solo drums kick       hear only the kick in drums""",
+    "macro": """\
+Define and manage reusable command sequences.
+
+Subcommands:
+  macro def <name> [desc] ; <cmd1> ; <cmd2> ...    define a macro
+  macro list                                        list all macros
+  macro show <name>                                 show macro commands
+  macro delete <name>                               delete a macro
+  macro edit <name> <cmd_index> <new_cmd>           edit a command
+  macro global <name>                               promote to global
+  macro local <name>                                demote to project
+  macro import <file>                               import from file
+
+Parameters: use $1, $2, ... in commands. Pass values when running.
+
+Examples:
+  macro def 4floor ; new drums 16 9 ; put drums 0,4,8,12 kick
+  4floor                                 run the macro
+  macro def beat $bpm ; bpm $bpm ; new drums 16 9
+  beat 120                               run with bpm=120""",
+    "save": """\
+Save the current session to a JSON file.
+
+Usage: save [filename]
+
+Without filename: saves to the last used file, or prompts.
+With filename:    saves to that file (adds .json if missing).
+
+Saves: all patterns (notes, velocities, gates, CC automation,
+swing, mute state), BPM, and drum map customizations.
+
+Examples:
+  save mysong            save to mysong.json
+  save                   re-save to last used file""",
+    "load": """\
+Load a session from a JSON file.
+
+Usage: load <filename>
+
+Replaces all current patterns and settings with the saved state.
+Loads: patterns, BPM, and drum map customizations.
+
+Examples:
+  load mysong            load from mysong.json
+  load mysong.json       same thing""",
+    "history": """\
+View and manipulate command history.
+
+Subcommands:
+  history view [id|range]     show history (all or filtered)
+  history delete <id|range>   remove entries
+  history copy <id|range>     copy commands to clipboard
+  history paste <after_id>    replay clipboard commands
+
+Range syntax: single ID (5) or range (3-7).
+
+Examples:
+  history view               show all history
+  history view 1-5           show entries 1 through 5
+  history copy 3-7           copy commands 3-7
+  history paste 0            replay copied commands""",
+    "tap": """\
+Play a single note immediately (preview a sound).
+
+Usage: tap <note> [velocity] [channel]
+
+Sends note_on, then note_off after 300ms. Does not affect patterns.
+
+Examples:
+  tap C3                 play C3 at vel 100 on ch 0
+  tap kick               play kick drum (ch 0, vel 100)
+  tap D#4 80 1           play D#4 at vel 80 on ch 1""",
+    "octave": """\
+Set the note naming convention (affects display only, not MIDI).
+
+Usage: octave <preset>
+
+Presets:
+  element    — MIDI 60 = C3  (Element, Reason)
+  yamaha     — MIDI 60 = C3  (Yamaha convention)
+  ableton    — MIDI 60 = C3  (Ableton default)
+
+Without args: shows current setting and available presets.
+This setting persists across sessions.
+
+Examples:
+  octave                show current octave convention
+  octave element        use Element/Reason naming""",
+    "drummap": """\
+Customize drum name → MIDI note mappings.
+
+Usage:
+  drummap <name> <note>    set or add a mapping
+  drummap <name>           show current mapping for a name
+  drummap reset            reset to GM defaults
+
+When you change a mapping, existing hits on ch 9 patterns are
+automatically updated to the new note number.
+
+Examples:
+  drummap kick 36          set kick to note 36 (GM default)
+  drummap kick C2          set kick using note name
+  drummap snare 40         move snare from 38 to 40
+  drummap reset            restore all GM defaults""",
+}
+
 
 def command(
     name: str,
@@ -2063,6 +2368,43 @@ class ChatInterface:
     @command("midi", "other", "toggle MIDI monitor")
     def cmd_midi(self, args: str):
         self.seq._notify({"type": "ui", "toggle": "midi"})
+
+    @command(
+        "explain",
+        "other",
+        "detailed command help",
+        usage="explain <command>",
+        hint_args=["<command>"],
+    )
+    def cmd_explain(self, args: str):
+        if not args:
+            documented = sorted(_COMMAND_DETAILS.keys())
+            self._emit("  Usage: explain <command>")
+            self._emit(f"  Available: {', '.join(documented)}")
+            return
+        name = args.strip().lower()
+        # Look up by name or alias
+        cmd_def = self._commands.get(name)
+        if not cmd_def:
+            self._emit(f"  Unknown command '{name}'. Try: help")
+            return
+        detail = _COMMAND_DETAILS.get(cmd_def.name)
+        if not detail:
+            usage = cmd_def.usage if cmd_def.usage else cmd_def.name
+            self._emit(f"  {cmd_def.name}: {cmd_def.description}")
+            self._emit(f"  Usage: {usage}")
+            self._emit("  (No detailed explanation available)")
+            return
+        lines = [
+            "",
+            f"  EXPLAIN: {cmd_def.name}",
+            "  " + "─" * 40,
+            *[f"  {line}" for line in detail.splitlines()],
+            "",
+        ]
+        for line in lines:
+            self._emit(line)
+        self.seq._notify({"type": "ui", "explain": True, "lines": lines})
 
     @command("help", "other", "toggle help / show commands", aliases=["?"])
     def cmd_help(self, args: str):

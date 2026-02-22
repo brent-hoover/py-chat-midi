@@ -1,0 +1,6 @@
+*.py
+*.toml
+*.lock
+__pycache__/
+.venv/
+node_modules/

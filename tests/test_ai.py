@@ -78,9 +78,10 @@ class TestAIContext:
 
 class TestHandleAIRequest:
     def test_missing_api_key(self, chat):
-        with patch.dict("os.environ", {}, clear=True):
-            with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
-                handle_ai_request(chat, AIRequest(message="test"))
+        with patch.dict("os.environ", {}, clear=True), pytest.raises(
+            ValueError, match="ANTHROPIC_API_KEY"
+        ):
+            handle_ai_request(chat, AIRequest(message="test"))
 
     def test_single_tool_call(self, chat):
         """Mock the Anthropic API to return a tool call, verify command executes."""
@@ -97,9 +98,11 @@ class TestHandleAIRequest:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
-            with patch("ai.anthropic.Anthropic", return_value=mock_client):
-                result = handle_ai_request(chat, AIRequest(message="create a drum pattern"))
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
+            patch("ai.anthropic.Anthropic", return_value=mock_client),
+        ):
+            result = handle_ai_request(chat, AIRequest(message="create a drum pattern"))
 
         assert "new drums 16 9" in result["commands"]
         assert "drums" in chat.seq.patterns
@@ -117,9 +120,11 @@ class TestHandleAIRequest:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_response
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
-            with patch("ai.anthropic.Anthropic", return_value=mock_client):
-                result = handle_ai_request(chat, AIRequest(message="hello"))
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
+            patch("ai.anthropic.Anthropic", return_value=mock_client),
+        ):
+            result = handle_ai_request(chat, AIRequest(message="hello"))
 
         assert "Here's your pattern!" in result["comments"]
         assert result["commands"] == []
@@ -149,9 +154,11 @@ class TestHandleAIRequest:
         mock_client = MagicMock()
         mock_client.messages.create.side_effect = [mock_response_1, mock_response_2]
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
-            with patch("ai.anthropic.Anthropic", return_value=mock_client):
-                result = handle_ai_request(chat, AIRequest(message="make a beat"))
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
+            patch("ai.anthropic.Anthropic", return_value=mock_client),
+        ):
+            result = handle_ai_request(chat, AIRequest(message="make a beat"))
 
         assert len(result["commands"]) == 1
         assert "Done!" in result["comments"]

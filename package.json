@@ -1,0 +1,18 @@
+{
+    "private": true,
+    "type": "module",
+    "devDependencies": {
+        "eslint": "^9",
+        "eslint-config-prettier": "^10",
+        "prettier": "^3",
+        "stylelint": "^16",
+        "stylelint-config-standard": "^37"
+    },
+    "scripts": {
+        "lint:js": "eslint static/",
+        "lint:css": "stylelint 'static/*.css'",
+        "lint:format": "prettier --check static/",
+        "lint": "npm run lint:js && npm run lint:css && npm run lint:format",
+        "format": "prettier --write static/"
+    }
+}

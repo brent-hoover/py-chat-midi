@@ -860,3 +860,39 @@ class TestHistory:
         run(chat, "history paste 0")
         pat = chat.seq.patterns["drums"]
         assert any(n == 36 for n, v, g in pat.data.get(0, []))
+
+
+# ── Explain ──────────────────────────────────────────────────────────
+
+
+class TestExplain:
+    def test_explain_put_returns_detail(self, chat):
+        out = run(chat, "explain put")
+        text = "\n".join(out)
+        assert "EXPLAIN: put" in text
+        assert "velocity" in text.lower()
+        assert "gate" in text.lower()
+
+    def test_explain_no_args_shows_usage(self, chat):
+        out = run(chat, "explain")
+        text = "\n".join(out)
+        assert "Usage: explain" in text
+        assert "put" in text  # listed as available
+
+    def test_explain_unknown_command(self, chat):
+        out = run(chat, "explain nonexistent")
+        text = "\n".join(out)
+        assert "Unknown command" in text
+
+    def test_explain_alias_lookup(self, chat):
+        """explain vol should find the volume command."""
+        out = run(chat, "explain vol")
+        text = "\n".join(out)
+        assert "EXPLAIN: volume" in text
+
+    def test_explain_command_without_detail(self, chat):
+        """Commands without detailed explanations show a basic fallback."""
+        out = run(chat, "explain play")
+        text = "\n".join(out)
+        assert "play" in text
+        assert "No detailed explanation" in text
