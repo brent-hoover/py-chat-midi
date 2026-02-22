@@ -1,6 +1,7 @@
 import asyncio
 import atexit
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -9,7 +10,19 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from ai import AIRequest, handle_ai_request
-from sequencer import DRUM_MAP, ChatInterface, Macro, Pattern, _command_registry
+from sequencer import (
+    _GM_DRUM_DEFAULTS,
+    DRUM_MAP,
+    ChatInterface,
+    Macro,
+    Pattern,
+    _command_registry,
+    configure_logging,
+    remap_drum_notes,
+)
+
+configure_logging("INFO")
+logger = logging.getLogger(__name__)
 
 AUTOSAVE_PATH = Path(__file__).parent / ".autosave.json"
 
@@ -34,8 +47,9 @@ def _autosave():
             "next_id": chat._next_id,
         }
         AUTOSAVE_PATH.write_text(json.dumps(data))
+        logger.debug("Autosaved %d patterns", len(chat.seq.patterns))
     except Exception:
-        pass
+        logger.error("Autosave failed", exc_info=True)
 
 
 def _autoload():
@@ -49,9 +63,9 @@ def _autoload():
         chat.seq.patterns.clear()
         for name, pat_dict in data["patterns"].items():
             chat.seq.patterns[name] = Pattern.from_dict(pat_dict)
-        if "drum_map" in data:
-            DRUM_MAP.clear()
-            DRUM_MAP.update(data["drum_map"])
+        DRUM_MAP.clear()
+        DRUM_MAP.update(data.get("drum_map", _GM_DRUM_DEFAULTS))
+        remap_drum_notes(chat.seq.patterns)
         if "macros" in data:
             for name, mdata in data["macros"].items():
                 macro = Macro.from_dict(mdata)
@@ -61,9 +75,9 @@ def _autoload():
             chat._history = [tuple(h) for h in data["history"]]
             chat._next_id = data.get("next_id", 1)
         n = len(chat.seq.patterns)
-        print(f"  ✓ Restored {n} pattern(s) from autosave ({chat.seq.bpm} BPM)")
+        logger.info("Restored %d patterns from autosave (%s BPM)", n, chat.seq.bpm)
     except Exception:
-        pass
+        logger.error("Autoload failed", exc_info=True)
 
 
 _autoload()
@@ -71,6 +85,7 @@ _autoload()
 
 def _shutdown():
     """Autosave state, close GUIs, stop MIDI, close port."""
+    logger.info("Shutting down — autosaving and closing MIDI")
     _autosave()
     chat.seq.close()
 
@@ -87,6 +102,7 @@ async def broadcast(message: dict):
         try:
             await ws.send_text(data)
         except Exception:
+            logger.warning("Removing disconnected WebSocket client")
             disconnected.add(ws)
     clients -= disconnected
 
@@ -98,6 +114,7 @@ _loop = None
 async def _capture_loop():
     global _loop
     _loop = asyncio.get_running_loop()
+    logger.debug("Event loop captured")
 
 
 def on_sequencer_event(event: dict):
@@ -113,6 +130,7 @@ chat.seq.add_listener(on_sequencer_event)
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     clients.add(ws)
+    logger.info("WebSocket client connected (%d total)", len(clients))
     # Send full state on connect
     await ws.send_text(json.dumps(chat.seq.get_state()))
     try:
@@ -121,7 +139,11 @@ async def websocket_endpoint(ws: WebSocket):
             msg = json.loads(data)
             if msg.get("type") == "command":
                 line = msg["line"]
+                logger.debug("WS command: %s", line)
+                cmd = line.strip().split()[0].lower() if line.strip() else ""
                 cont, output = await asyncio.to_thread(chat.handle, line)
+                if cmd == "load":
+                    await broadcast({"type": "ui", "clear_log": True})
                 for out_line in output:
                     await broadcast({"type": "output", "text": out_line})
                 # Broadcast updated state after command
@@ -164,13 +186,16 @@ async def websocket_endpoint(ws: WebSocket):
                     )
     except WebSocketDisconnect:
         clients.discard(ws)
+        logger.info("WebSocket client disconnected (%d remaining)", len(clients))
 
 
 @app.post("/api/ai")
 async def ai_translate(req: AIRequest):
+    logger.info("AI request: %s", req.message[:100])
     try:
         result = handle_ai_request(chat, req)
     except ValueError as e:
+        logger.error("AI request failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from None
     await broadcast(chat.seq.get_state())
     return result
@@ -216,9 +241,9 @@ async def load_session(req: dict):
 
     for name, pat_dict in req["patterns"].items():
         chat.seq.patterns[name] = Pattern.from_dict(pat_dict)
-    if "drum_map" in req:
-        DRUM_MAP.clear()
-        DRUM_MAP.update(req["drum_map"])
+    DRUM_MAP.clear()
+    DRUM_MAP.update(req.get("drum_map", _GM_DRUM_DEFAULTS))
+    remap_drum_notes(chat.seq.patterns)
     if "macros" in req:
         for name, mdata in req["macros"].items():
             macro = Macro.from_dict(mdata)

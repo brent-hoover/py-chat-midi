@@ -10,6 +10,7 @@ Setup:
 """
 
 import json
+import logging
 import re
 import sys
 import threading
@@ -19,6 +20,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import mido
+
+logger = logging.getLogger(__name__)
+
+
+def configure_logging(level: str = "INFO"):
+    """Configure root logger. Call from entry points only (server, CLI, desktop)."""
+    logging.basicConfig(
+        level=getattr(logging, level.upper(), logging.INFO),
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -38,6 +51,23 @@ DRUM_MAP = {
     "rimshot": 37,
 }
 _GM_DRUM_DEFAULTS = dict(DRUM_MAP)  # immutable copy for drummap replacements
+
+
+def remap_drum_notes(patterns: dict) -> None:
+    """Remap notes in ch9 patterns where GM defaults differ from current DRUM_MAP."""
+    for pat in patterns.values():
+        if pat.channel != 9:
+            continue
+        for name, new_note in DRUM_MAP.items():
+            gm_note = _GM_DRUM_DEFAULTS.get(name)
+            if gm_note is not None and gm_note != new_note:
+                for step in list(pat.data.keys()):
+                    pat.data[step] = [
+                        (new_note, v, g) if n == gm_note else (n, v, g)
+                        for n, v, g in pat.data[step]
+                    ]
+
+
 OCTAVE_PRESETS = {
     "element": 0,  # MIDI 60 = C5 (Element, current default)
     "yamaha": -1,  # MIDI 60 = C4 (Yamaha, Roland, Logic)
@@ -182,6 +212,7 @@ class Sequencer:
         # Open virtual MIDI port
         try:
             self.port = mido.open_output(port_name, virtual=True)
+            logger.info("Opened virtual MIDI port: %s", port_name)
             print(f"✓ Virtual MIDI port '{port_name}' created.")
             print(f"  → In your Synth software : set MIDI input to '{port_name}'")
         except Exception:
@@ -190,8 +221,10 @@ class Sequencer:
             match = [p for p in available if port_name.lower() in p.lower()]
             if match:
                 self.port = mido.open_output(match[0])
+                logger.info("Connected to existing MIDI port: %s", match[0])
                 print(f"✓ Connected to existing port '{match[0]}'")
             else:
+                logger.error("Could not create virtual MIDI port. Available: %s", available)
                 print("✗ Could not create virtual port. Available ports:")
                 for p in available:
                     print(f"    {p}")
@@ -308,95 +341,104 @@ class Sequencer:
         self._thread = None
 
     def _run(self):
+        _debug = logger.isEnabledFor(logging.DEBUG)
         while not self._stop_event.is_set():
-            step_time = time.perf_counter()
-            now = step_time
+            try:
+                step_time = time.perf_counter()
+                now = step_time
 
-            # Turn off expired notes
-            still_active = []
-            for note, ch, off_time in self.active_notes:
-                if now >= off_time:
-                    self._send(mido.Message("note_off", note=note, channel=ch, velocity=0))
-                else:
-                    still_active.append((note, ch, off_time))
-            self.active_notes = still_active
+                if _debug:
+                    logger.debug("step %d", self.current_step)
 
-            # Check again after note-off processing
-            if self._stop_event.is_set():
-                break
+                # Turn off expired notes
+                still_active = []
+                for note, ch, off_time in self.active_notes:
+                    if now >= off_time:
+                        self._send(mido.Message("note_off", note=note, channel=ch, velocity=0))
+                    else:
+                        still_active.append((note, ch, off_time))
+                self.active_notes = still_active
 
-            # Fire current step across all patterns
-            is_odd_step = self.current_step % 2 == 1
-            for pat in self.patterns.values():
-                if pat.muted:
-                    continue
-                cur = self.current_step % pat.steps
+                # Check again after note-off processing
+                if self._stop_event.is_set():
+                    break
 
-                # Send CC automation before notes
-                if pat.cc_auto:
-                    cc_sent = []
-                    for cc_num, keyframes in pat.cc_auto.items():
-                        mode = pat.cc_interp.get(cc_num, "linear")
-                        val = self._interpolate_cc(keyframes, cur, pat.steps, mode)
-                        self._send(
-                            mido.Message(
-                                "control_change",
-                                channel=pat.channel,
-                                control=cc_num,
-                                value=val,
+                # Fire current step across all patterns
+                is_odd_step = self.current_step % 2 == 1
+                for pat in self.patterns.values():
+                    if pat.muted:
+                        continue
+                    cur = self.current_step % pat.steps
+
+                    # Send CC automation before notes
+                    if pat.cc_auto:
+                        cc_sent = []
+                        for cc_num, keyframes in pat.cc_auto.items():
+                            mode = pat.cc_interp.get(cc_num, "linear")
+                            val = self._interpolate_cc(keyframes, cur, pat.steps, mode)
+                            self._send(
+                                mido.Message(
+                                    "control_change",
+                                    channel=pat.channel,
+                                    control=cc_num,
+                                    value=val,
+                                )
                             )
-                        )
-                        cc_sent.append({"cc": cc_num, "value": val})
-                    if cc_sent:
-                        self._notify(
-                            {
-                                "type": "midi_out",
-                                "pattern": pat.name,
-                                "step": cur,
-                                "notes": [],
-                                "cc": cc_sent,
-                            }
-                        )
+                            cc_sent.append({"cc": cc_num, "value": val})
+                        if cc_sent:
+                            self._notify(
+                                {
+                                    "type": "midi_out",
+                                    "pattern": pat.name,
+                                    "step": cur,
+                                    "notes": [],
+                                    "cc": cc_sent,
+                                }
+                            )
 
-                step_notes = pat.data.get(cur, [])
-                if not step_notes:
-                    continue
-                if not is_odd_step:
-                    self._fire_notes(pat, step_notes, now, step=cur)
-                else:
-                    # Group notes by their swing amount
-                    straight = []
-                    by_swing: dict[int, list] = {}
-                    for entry in step_notes:
-                        note = entry[0]
-                        sw = pat.swing_notes.get(note, pat.swing)
-                        if sw == 0:
-                            straight.append(entry)
-                        else:
-                            by_swing.setdefault(sw, []).append(entry)
-                    if straight:
-                        self._fire_notes(pat, straight, now, step=cur)
-                    for sw_val, notes in by_swing.items():
-                        delay = self.step_duration * (sw_val / 100) * 0.5
-                        threading.Timer(
-                            delay,
-                            self._fire_notes,
-                            args=(pat, notes, now + delay),
-                            kwargs={"step": cur, "swing": sw_val},
-                        ).start()
+                    step_notes = pat.data.get(cur, [])
+                    if not step_notes:
+                        continue
+                    if not is_odd_step:
+                        self._fire_notes(pat, step_notes, now, step=cur)
+                    else:
+                        # Group notes by their swing amount
+                        straight = []
+                        by_swing: dict[int, list] = {}
+                        for entry in step_notes:
+                            note = entry[0]
+                            sw = pat.swing_notes.get(note, pat.swing)
+                            if sw == 0:
+                                straight.append(entry)
+                            else:
+                                by_swing.setdefault(sw, []).append(entry)
+                        if straight:
+                            self._fire_notes(pat, straight, now, step=cur)
+                        for sw_val, notes in by_swing.items():
+                            delay = self.step_duration * (sw_val / 100) * 0.5
+                            threading.Timer(
+                                delay,
+                                self._fire_notes,
+                                args=(pat, notes, now + delay),
+                                kwargs={"step": cur, "swing": sw_val},
+                            ).start()
 
-            self.current_step += 1
-            self._notify({"type": "playhead", "step": self.current_step - 1})
+                self.current_step += 1
+                self._notify({"type": "playhead", "step": self.current_step - 1})
 
-            # Sleep until next step
-            elapsed = time.perf_counter() - step_time
-            sleep_time = self.step_duration - elapsed
-            if sleep_time > 0:
-                self._stop_event.wait(sleep_time)
+                # Sleep until next step
+                elapsed = time.perf_counter() - step_time
+                sleep_time = self.step_duration - elapsed
+                if sleep_time > 0:
+                    self._stop_event.wait(sleep_time)
+            except Exception:
+                logger.error("Exception in playback thread", exc_info=True)
+                break
 
     def play(self) -> str | None:
         if self.playing:
             return None
+        logger.info("Starting playback at %s BPM", self.bpm)
         self._kill_thread()
         self.playing = True
         self.current_step = 0
@@ -409,6 +451,7 @@ class Sequencer:
     def stop(self) -> str | None:
         if not self.playing:
             return None
+        logger.info("Stopping playback")
         self.playing = False
         self._kill_thread()
         self._all_notes_off()
@@ -419,6 +462,7 @@ class Sequencer:
     def close(self):
         self.stop()
         self.port.close()
+        logger.info("MIDI port closed")
 
     def get_state(self) -> dict:
         state = {
@@ -530,6 +574,7 @@ class Sequencer:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
+        logger.info("Saved %d patterns to %s", len(self.patterns), path)
         return str(path)
 
     def load(self, filepath: str):
@@ -541,9 +586,10 @@ class Sequencer:
         self.patterns.clear()
         for name, pat_dict in data["patterns"].items():
             self.patterns[name] = Pattern.from_dict(pat_dict)
-        if "drum_map" in data:
-            DRUM_MAP.clear()
-            DRUM_MAP.update(data["drum_map"])
+        DRUM_MAP.clear()
+        DRUM_MAP.update(data.get("drum_map", _GM_DRUM_DEFAULTS))
+        remap_drum_notes(self.patterns)
+        logger.info("Loaded %d patterns from %s", len(self.patterns), filepath)
         return str(filepath)
 
 
@@ -587,7 +633,7 @@ def _load_settings() -> dict:
         try:
             return json.loads(SETTINGS_FILE.read_text())
         except (json.JSONDecodeError, OSError):
-            pass
+            logger.error("Failed to load settings from %s", SETTINGS_FILE, exc_info=True)
     return {}
 
 
@@ -676,6 +722,7 @@ class ChatInterface:
 
     def _snapshot(self) -> dict:
         """Capture current sequencer state for undo."""
+        logger.debug("Capturing undo snapshot")
         return self.seq.get_state()
 
     def _restore(self, snapshot: dict):
@@ -712,7 +759,7 @@ class ChatInterface:
                 macro.scope = "global"
                 self._macros[macro.name] = macro
             except Exception:
-                pass
+                logger.error("Failed to load macro from %s", path, exc_info=True)
 
     def _save_global_macro(self, macro: Macro):
         """Save a macro to the global macros/ directory."""
@@ -743,6 +790,7 @@ class ChatInterface:
             return
 
         # Substitute and run
+        logger.debug("Running macro '%s' with args: %s", macro.name, kwargs)
         self._emit(f"  ▶ Running macro '{macro.name}'")
         for cmd_template in macro.commands:
             cmd_line = cmd_template
@@ -782,14 +830,13 @@ class ChatInterface:
             remainder = [x for x in pattern if x != pattern[0]]
             if len(remainder) <= 1:
                 break
+            boundary = len(pattern) - len(remainder)
+            pairs = min(boundary, len(remainder))
             new_pattern = []
-            i, j = 0, len(pattern) - len(remainder)
-            while i < j and j < len(pattern):
-                new_pattern.append(pattern[i] + pattern[j])
-                i += 1
-                j += 1
-            new_pattern.extend(pattern[i:j])
-            new_pattern.extend(pattern[j:])
+            for k in range(pairs):
+                new_pattern.append(pattern[k] + pattern[boundary + k])
+            new_pattern.extend(pattern[pairs:boundary])
+            new_pattern.extend(pattern[boundary + pairs :])
             pattern = new_pattern
         flat = []
         for group in pattern:
@@ -995,7 +1042,12 @@ class ChatInterface:
         for s in steps:
             pat.data[s] = [(n, new_vel if n == note else v, g) for n, v, g in pat.data.get(s, [])]
             count += sum(1 for n, _v, _g in pat.data[s] if n == note)
-        self._emit(f"  ✓ Set velocity {new_vel} on {count} hit(s)")
+        if count == 0:
+            self._emit(
+                f"  No {note_str} hits found on those steps. Use 'put' to place notes first."
+            )
+        else:
+            self._emit(f"  ✓ Set velocity {new_vel} on {count} hit(s)")
 
     @command(
         "remove",
@@ -1861,7 +1913,6 @@ class ChatInterface:
                 self._macros[name] = macro
         n_pat = len(self.seq.patterns)
         self._emit(f"  ✓ Loaded from {path} ({n_pat} patterns, {self.seq.bpm} BPM)")
-        self.seq._notify({"type": "ui", "clear_log": True})
 
     @command("run", "other", "run a command script", usage="run <file>", hint_args=["<file.txt>"])
     def cmd_run(self, args: str):
@@ -2015,6 +2066,8 @@ class ChatInterface:
         cmd = cmd.lower()
         args = args.strip()
 
+        logger.debug("cmd: %s %s", cmd, args)
+
         PATTERN_COMMANDS = {
             "put",
             "show",
@@ -2070,6 +2123,7 @@ class ChatInterface:
 
             self._notify_state()
         except Exception as e:
+            logger.error("Command error: %s %s", cmd, args, exc_info=True)
             self._emit(f"  Error: {e}")
 
         return True, self._output
@@ -2096,4 +2150,5 @@ class ChatInterface:
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    configure_logging("DEBUG" if "--debug" in sys.argv else "INFO")
     ChatInterface().run()

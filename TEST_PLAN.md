@@ -1,15 +1,38 @@
-# Manual Test Plan
+# Test Plan
+
+## Automated tests
+
+```bash
+uv run pytest tests/ -v              # all tests
+uv run pytest tests/test_sequencer.py -v  # fast unit tests only
+uv run pytest tests/test_ui.py -v         # Playwright UI tests (starts server)
+```
+
+## Manual tests
 
 Start the server: `uv run uvicorn server:app --reload`
 Open: http://127.0.0.1:8000
 
+## Example file
+
+`examples/example.json` — 128 BPM, two patterns:
+- **drums** (ch9, 16 steps): kick on 0,4,8,12 / snare on 2,6,10,14 / hihat on all 16 (vel 60)
+- **bass** (ch0, 16 steps): notes on 0,4,8,12
+
+Load with: `load examples/example.json` or via the Load button.
+
+## Conventions
+
+- **[FRESH]** — restart server, open a clean browser tab (or clear localStorage)
+- **[EXAMPLE]** — load `examples/example.json` first
+
 ---
 
-## 1. Transport
+## 1. Transport [EXAMPLE]
 
 ### 1.1 Play/Stop via button
 - **Do:** Click the Play button in the transport bar
-- **Observe:** Button changes to "Stop", playhead animates across pattern grids
+- **Observe:** Button changes to "Stop", playhead animates across both pattern grids
 
 - **Do:** Click Stop
 - **Observe:** Button changes to "Play", playhead disappears
@@ -38,7 +61,7 @@ Open: http://127.0.0.1:8000
 
 ---
 
-## 2. Pattern Creation & Management
+## 2. Pattern Creation & Management [FRESH]
 
 ### 2.1 New pattern
 - **Do:** Type `new mybeat 16 9` (16 steps, channel 9/drums)
@@ -53,155 +76,154 @@ Open: http://127.0.0.1:8000
 - **Observe:** Pattern removed from detail view and overview
 
 ### 2.4 Rename pattern
-- **Do:** Create a pattern, then type `rename oldname newname`
+- **Do:** Create a pattern (`new test 16 0`), then type `rename test renamed`
 - **Observe:** Pattern name updates everywhere
 
-### 2.5 Copy pattern
-- **Do:** Type `copy mybeat mybeat2`
+### 2.5 Copy pattern [EXAMPLE]
+- **Do:** Type `copy drums drums2`
 - **Observe:** New pattern appears with same data as original
 
-### 2.6 Pattern length
-- **Do:** Type `len mybeat 32`
+### 2.6 Pattern length [EXAMPLE]
+- **Do:** Type `len drums 32`
 - **Observe:** Grid expands to 32 columns
 
 ---
 
-## 3. Note Editing
+## 3. Note Editing [FRESH]
 
 ### 3.1 Put notes
-- **Do:** Type `put mybeat 0,4,8,12 kick 100`
+- **Do:** Type `new beat 16 9`, then `put beat 0,4,8,12 kick 100`
 - **Observe:** Grid cells fill at steps 0, 4, 8, 12 on the kick row
 
 ### 3.2 Put with range
-- **Do:** Type `put mybeat 0-7 hihat 80`
+- **Do:** Type `put beat 0-7 hihat 80`
 - **Observe:** Steps 0 through 7 fill on hihat row
 
 ### 3.3 Put with stride
-- **Do:** Type `put mybeat 0-15:2 snare 90`
+- **Do:** Type `put beat 0-15:2 snare 90`
 - **Observe:** Even steps fill on snare row
 
 ### 3.4 Clear steps
-- **Do:** Type `clear mybeat 0,4`
+- **Do:** Type `clear beat 0,4`
 - **Observe:** Those steps empty across all notes
 
 ### 3.5 Remove specific notes
-- **Do:** Type `remove mybeat 0-3 kick`
+- **Do:** Type `remove beat 0-3 kick`
 - **Observe:** Kick notes removed from steps 0-3, other notes untouched
 
 ### 3.6 Euclid
-- **Do:** Type `euclid mybeat 5 16 hihat 100`
+- **Do:** Type `new euc 16 9`, then `euclid euc 5 16 hihat 100`
 - **Observe:** 5 hits distributed across 16 steps in a Euclidean pattern
 
 ### 3.7 Arp
-- **Do:** Create a melodic pattern (`new melody 16 0`), type `arp melody 0-15 C4,E4,G4 100`
+- **Do:** Type `new melody 16 0`, then `arp melody 0-15 C4,E4,G4 100`
 - **Observe:** Notes cycle through C4, E4, G4 across steps
 
 ---
 
-## 4. Velocity
+## 4. Velocity [EXAMPLE] *(partially automated: test_sequencer.py, test_ui.py)*
 
 ### 4.1 Velocity command
-- **Do:** Type `vel mybeat 0-15:2 hihat 120`
-- **Observe:** Log confirms velocity change
+- **Do:** Type `vel drums 0-15:2 hihat 120`
+- **Observe:** Log confirms "Set velocity 120 on 8 hit(s)" (example has hihat on all 16 steps)
 
-### 4.2 Velocity-based brightness (grid)
-- **Do:** Create a drum pattern with mixed velocities:
-  ```
-  new drums 16 9
-  put drums 0-15:2 hihat 120
-  put drums 1-15:2 hihat 40
-  ```
-- **Observe:** On-beat hihat cells (even steps) are visibly brighter than off-beat cells (odd steps)
+### 4.2 Velocity on empty steps
+- **Do:** Type `vel drums 0-15 cowbell 120`
+- **Observe:** Log shows "No cowbell hits found on those steps. Use 'put' to place notes first."
 
-### 4.3 Velocity brightness range
+### 4.3 Velocity-based brightness (grid)
+- **Do:** Type `vel drums 0-15:2 hihat 120` (even steps loud), then `vel drums 1-15:2 hihat 30` (odd steps quiet)
+- **Observe:** Even-step hihat cells are visibly brighter than odd-step cells
+
+### 4.4 Velocity brightness range
 - **Do:** Type `vel drums 0 hihat 1` then `vel drums 2 hihat 127`
 - **Observe:** Step 0 cell is dim but still visible (~35% opacity). Step 2 cell is full brightness
 
-### 4.4 Playhead + velocity
-- **Do:** Start playback with mixed-velocity pattern
+### 4.5 Playhead + velocity
+- **Do:** Start playback with mixed-velocity pattern from above
 - **Observe:** Playhead highlight still shows correctly on both bright and dim cells
 
 ---
 
-## 5. Pattern Display
+## 5. Pattern Display [EXAMPLE]
 
 ### 5.1 Show command
-- **Do:** Type `show mybeat`
+- **Do:** Type `show drums`
 - **Observe:** ASCII grid printed in command log
 
 ### 5.2 Fold/Unfold
-- **Do:** Type `fold mybeat`
+- **Do:** Type `fold drums`
 - **Observe:** Pattern grid collapses in detail view
 
-- **Do:** Type `unfold mybeat`
+- **Do:** Type `unfold drums`
 - **Observe:** Pattern grid expands back
 
 ### 5.3 Select
-- **Do:** Type `select mybeat`
-- **Observe:** Pattern highlights in overview sidebar, detail view scrolls to it
+- **Do:** Type `select bass`
+- **Observe:** Bass pattern highlights in overview sidebar, detail view scrolls to it
 
 ### 5.4 Scroll
-- **Do:** Create 3+ patterns, type `up` / `down`
+- **Do:** Type `new pad 16 1` to get 3 patterns, then type `up` / `down`
 - **Observe:** Detail view scrolls through patterns
 
 ---
 
-## 6. Mute/Solo
+## 6. Mute/Solo [EXAMPLE] *(partially automated: test_sequencer.py, test_ui.py)*
 
 ### 6.1 Mute pattern
-- **Do:** Type `mute mybeat`, start playback
-- **Observe:** Pattern is muted (no MIDI output from it), visual indicator in overview
+- **Do:** Type `mute drums`, start playback
+- **Observe:** Drums silent, bass still plays, visual indicator in overview
 
 ### 6.2 Unmute
-- **Do:** Type `unmute mybeat`
-- **Observe:** Pattern plays again
+- **Do:** Type `unmute drums`
+- **Observe:** Drums play again
 
 ### 6.3 Solo
-- **Do:** With multiple patterns, type `solo mybeat`
-- **Observe:** Only mybeat plays, others silenced
+- **Do:** Type `solo drums`
+- **Observe:** Only drums play, bass silenced
 
 ### 6.4 Mute note
-- **Do:** Type `mute mybeat hihat`
-- **Observe:** Hihat muted within the pattern, other notes still play
+- **Do:** Type `mute drums hihat`, start playback
+- **Observe:** Hihat muted within drums, kick and snare still play
 
 ---
 
-## 7. Pattern Transforms
+## 7. Pattern Transforms [EXAMPLE]
 
 ### 7.1 Shift
-- **Do:** Type `shift mybeat 2`
-- **Observe:** All notes shift 2 steps to the right
+- **Do:** Type `shift drums 2`
+- **Observe:** All notes shift 2 steps to the right (kick moves from 0,4,8,12 to 2,6,10,14)
 
 ### 7.2 Reverse
-- **Do:** Type `reverse mybeat`
+- **Do:** Type `reverse drums`
 - **Observe:** Step order flips
 
 ### 7.3 Humanize
-- **Do:** Type `humanize mybeat 10`
-- **Observe:** Velocities randomized slightly (check via `show`)
+- **Do:** Type `humanize drums 10`
+- **Observe:** Velocities randomized slightly (check via `show drums`)
 
 ### 7.4 Swing
-- **Do:** Type `swing mybeat 50`
-- **Observe:** Even steps get timing offset during playback
+- **Do:** Type `swing drums 50`, start playback
+- **Observe:** Off-beats get timing delay during playback
 
 ### 7.5 Swing per-note
-- **Do:** Type `swing mybeat 60 kick`
+- **Do:** Type `swing drums 60 kick`
 - **Observe:** Log confirms swing set on kick only
 
 ### 7.6 Swing error on step range
-- **Do:** Type `swing mybeat 0-15 kick`
-- **Observe:** Error message says "Swing amount must be 0-100, not a step range" with usage hint
+- **Do:** Type `swing drums 0-15 kick`
+- **Observe:** Error: "Swing amount must be 0-100, not a step range" with usage hint
 
 ---
 
-## 8. MIDI
+## 8. MIDI [EXAMPLE]
 
 ### 8.1 MIDI monitor
 - **Do:** Type `midi` to toggle monitor, start playback
 - **Observe:** MIDI monitor panel appears showing note-on events with note names, velocities
 
 ### 8.2 CC
-- **Do:** Type `cc mybeat 0-15 74 0 127`
+- **Do:** Type `auto drums cc74 0:0 15:127`, start playback
 - **Observe:** CC automation shows in MIDI monitor during playback
 
 ### 8.3 Panic
@@ -220,43 +242,54 @@ Open: http://127.0.0.1:8000
 
 ## 9. Session Save/Load
 
-### 9.1 Save via button
+### 9.1 Save via button [EXAMPLE]
 - **Do:** Click Save in transport bar
 - **Observe:** Browser downloads `session.json`
 
-### 9.2 Load via button
-- **Do:** Run a few commands to populate the log, then click Load and select a saved `session.json`
-- **Observe:** All patterns restore with correct notes, velocities, BPM. Command log is cleared (only shows load success message)
+### 9.2 Load via button [FRESH]
+- **Do:** Type a few commands to populate the log, then click Load and select the `session.json` from 9.1
+- **Observe:** Both patterns restore with correct notes, velocities, 128 BPM. Command log is cleared (only shows load success message)
 
-### 9.3 Save/Load via command
-- **Do:** Type `save mysession.json`
+### 9.3 Save/Load via command [EXAMPLE]
+- **Do:** Type `save test_session.json`
 - **Observe:** File saved to server
 
-- **Do:** Run a few commands, then type `load mysession.json`
+- **Do:** Type a few commands, then type `load test_session.json`
 - **Observe:** Session restores, command log is cleared
+
+### 9.4 Autosave with remapped drums
+- **Do:** Load example, remap a drum (`drummap hihat G#1`), then restart the server (autosave triggers on shutdown)
+- **Observe:** On restart, `show drums` shows hihat on G#1 row (not F#1)
+- **Observe:** `vel drums 0-15 hihat 120` correctly finds and updates hihat hits (not "0 hits")
+
+### 9.5 Explicit load with remapped drums [FRESH]
+- **Do:** Type `load examples/example.json`, then `drummap hihat G#1`, then `save remap_test.json`
+- **Do:** Restart server, delete `.autosave.json`, then `load remap_test.json`
+- **Observe:** `vel drums 0-15 hihat 120` correctly finds and updates hihat hits
+- **Observe:** Grid shows hihat notes on the correct row matching the remapped note
 
 ---
 
-## 10. Undo/Redo
+## 10. Undo/Redo [EXAMPLE]
 
 ### 10.1 Undo
-- **Do:** Make a change (e.g. `put`), then type `undo`
-- **Observe:** Change is reverted
+- **Do:** Type `put drums 0-15 cowbell 100`, then type `undo`
+- **Observe:** Cowbell notes removed, grid returns to previous state
 
 ### 10.2 Redo
 - **Do:** After undo, type `redo`
-- **Observe:** Change is re-applied
+- **Observe:** Cowbell notes reappear
 
 ---
 
-## 11. Macros
+## 11. Macros [FRESH]
 
 ### 11.1 Create macro
 - **Do:** Type `macro fourfloor put ${pat} 0,4,8,12 kick 100; put ${pat} 2,6,10,14 hihat 80`
 - **Observe:** Macro created confirmation
 
 ### 11.2 Run macro
-- **Do:** Type `fourfloor pat=drums`
+- **Do:** Type `new drums 16 9`, then `fourfloor pat=drums`
 - **Observe:** Both put commands execute, notes appear in grid
 
 ### 11.3 Edit macro
@@ -265,7 +298,7 @@ Open: http://127.0.0.1:8000
 
 ---
 
-## 12. UI Controls
+## 12. UI Controls [EXAMPLE]
 
 ### 12.1 Layout width presets
 - **Do:** Use the width dropdown (Compact/Normal/Wide/Full)
@@ -300,48 +333,48 @@ Open: http://127.0.0.1:8000
 
 ---
 
-## 13. Overview Sidebar
+## 13. Overview Sidebar [EXAMPLE]
 
 ### 13.1 Pattern list
-- **Do:** Create multiple patterns
-- **Observe:** Overview shows all patterns with density bars
+- **Do:** Verify drums and bass appear in overview
+- **Observe:** Both patterns shown with density bars
 
 ### 13.2 Click to select
-- **Do:** Click a pattern name in the overview
-- **Observe:** Detail view scrolls to that pattern, selection highlights
+- **Do:** Click `bass` in the overview
+- **Observe:** Detail view scrolls to bass, selection highlights
 
 ### 13.3 Density bars update
-- **Do:** Add/remove notes from a pattern
-- **Observe:** Density visualization updates in overview
+- **Do:** Type `clear bass 0,4`
+- **Observe:** Density visualization updates in overview (fewer filled segments)
 
 ---
 
-## 14. Octave Offset
+## 14. Octave Offset [EXAMPLE]
 
 ### 14.1 Octave display
-- **Do:** Type `oct -1`
-- **Observe:** Note labels in grid update (e.g. C4 becomes C3)
+- **Do:** Type `octave yamaha` (or `oct -1`)
+- **Observe:** Note labels in bass grid update (e.g. C2 becomes C1)
 
 ---
 
-## 15. Drums
+## 15. Drums [EXAMPLE]
 
 ### 15.1 Drum map
 - **Do:** Type `drums`
 - **Observe:** Drum name to MIDI note mapping displayed
 
 ### 15.2 Drum names in grid
-- **Do:** Create a channel 9 pattern and add notes
-- **Observe:** Grid rows show drum names (kick, snare, hihat) instead of note names
+- **Do:** Verify the drums pattern grid
+- **Observe:** Rows show drum names (kick, snare, hihat) instead of note numbers
 
 ---
 
-## 16. Describe/Dump
+## 16. Describe/Dump [EXAMPLE]
 
 ### 16.1 Describe
 - **Do:** Type `describe`
-- **Observe:** Compact overview of all patterns printed to log
+- **Observe:** Compact overview showing drums (ch9, 16 steps) and bass (ch0, 16 steps)
 
 ### 16.2 Dump
 - **Do:** Type `dump`
-- **Observe:** Full JSON state printed to log
+- **Observe:** Full JSON state printed to log including both patterns

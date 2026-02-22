@@ -1,5 +1,6 @@
 """AI tool-use integration for the MIDI Chat Sequencer."""
 
+import logging
 import os
 from pathlib import Path
 
@@ -7,6 +8,8 @@ import anthropic
 from pydantic import BaseModel
 
 from sequencer import DRUM_MAP, SCALE_INTERVALS, ChatInterface, _command_registry
+
+logger = logging.getLogger(__name__)
 
 # Commands the AI should NOT have access to (meta/dangerous/irrelevant)
 _AI_EXCLUDED_COMMANDS = {
@@ -146,6 +149,7 @@ def handle_ai_request(chat: ChatInterface, req: AIRequest) -> dict:
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
+        logger.warning("ANTHROPIC_API_KEY not set")
         raise ValueError("ANTHROPIC_API_KEY not set")
 
     system = build_system_prompt()
@@ -153,6 +157,7 @@ def handle_ai_request(chat: ChatInterface, req: AIRequest) -> dict:
     if context_block:
         system = system + "\n\n" + context_block
 
+    logger.info("AI request: %s (model=claude-sonnet-4-20250514)", req.message[:80])
     ai_client = anthropic.Anthropic(api_key=api_key)
     messages = [{"role": "user", "content": req.message}]
 
@@ -161,7 +166,7 @@ def handle_ai_request(chat: ChatInterface, req: AIRequest) -> dict:
     all_output = []
     max_rounds = 10
 
-    for _ in range(max_rounds):
+    for round_num in range(max_rounds):
         response = ai_client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=1024,
@@ -170,14 +175,22 @@ def handle_ai_request(chat: ChatInterface, req: AIRequest) -> dict:
             messages=messages,
         )
 
+        logger.debug(
+            "AI round %d: stop_reason=%s, %d content blocks",
+            round_num,
+            response.stop_reason,
+            len(response.content),
+        )
         tool_results = []
         for block in response.content:
             if block.type == "text" and block.text.strip():
+                logger.debug("AI text: %s", block.text.strip()[:100])
                 comments.append(block.text.strip())
             elif block.type == "tool_use":
                 cmd_name = block.name.removeprefix("seq_")
                 args = block.input.get("args", "")
                 cmd_line = f"{cmd_name} {args}".strip() if args else cmd_name
+                logger.debug("AI tool: %s args=%s", cmd_name, args)
                 commands.append(cmd_line)
                 cont, output = chat.handle(cmd_line)
                 all_output.extend(output)

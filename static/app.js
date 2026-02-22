@@ -115,7 +115,6 @@ function sequencer() {
             } else if (msg.type === 'ui') {
                 if (msg.select) {
                     this.selectedPattern = msg.select;
-                    this.scrollToPattern(msg.select);
                 }
                 if (msg.scroll === 'up') this.scrollUp();
                 if (msg.scroll === 'down') this.scrollDown();
