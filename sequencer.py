@@ -97,10 +97,17 @@ CATEGORY_ORDER = [
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
+_FLAT_TO_SHARP = {"Cb": "B", "Db": "C#", "Eb": "D#", "Fb": "E", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
+
+
 def note_name_to_midi(name: str, octave_offset: int = 0) -> int:
     """Convert e.g. 'C4', 'F#3', 'Bb5' to MIDI note number."""
-    name = name.strip().replace("b", "#")  # normalize flats crudely
-    # handle double-sharp edge cases? nah.
+    name = name.strip()
+    # Normalize flats to sharps (Bb5 -> A#5, Eb3 -> D#3)
+    for flat, sharp in _FLAT_TO_SHARP.items():
+        if name.upper().startswith(flat.upper()):
+            name = sharp + name[2:]
+            break
     match = re.match(r"^([A-G]#?)(-?\d+)$", name, re.IGNORECASE)
     if not match:
         raise ValueError(f"Invalid note name: {name}")
@@ -471,6 +478,7 @@ class Sequencer:
             "playing": self.playing,
             "octave_offset": self.octave_offset,
             "patterns": {name: pat.to_dict() for name, pat in self.patterns.items()},
+            "drum_map": {v: k for k, v in DRUM_MAP.items()},
         }
         return state
 
@@ -1050,6 +1058,41 @@ class ChatInterface:
             self._emit(f"  ✓ Set velocity {new_vel} on {count} hit(s)")
 
     @command(
+        "volume",
+        "editing",
+        "adjust pattern velocity",
+        usage="volume <pat> <+/-N or N%>",
+        hint_args=["<pattern>", "<+/-N or N%>"],
+        aliases=["vol"],
+    )
+    def cmd_volume(self, args: str):
+        parts = args.split()
+        if len(parts) < 2:
+            self._emit("Usage: volume <pattern> <+/-N or +/-N%>")
+            return
+        pat_name, val_str = parts[0], parts[1]
+        if pat_name not in self.seq.patterns:
+            self._emit(f"  Pattern '{pat_name}' not found")
+            return
+        pat = self.seq.patterns[pat_name]
+        is_percent = val_str.endswith("%")
+        if is_percent:
+            pct = float(val_str[:-1])
+            # +50% = multiply by 1.5, -50% = multiply by 0.5
+            factor = 1.0 + pct / 100.0
+        else:
+            delta = int(val_str)
+        count = 0
+        for step in pat.data:
+            pat.data[step] = [
+                (n, max(1, min(127, round(v * factor) if is_percent else v + delta)), g)
+                for n, v, g in pat.data[step]
+            ]
+            count += len(pat.data[step])
+        sign = "+" if (factor >= 1.0 if is_percent else delta >= 0) else ""
+        self._emit(f"  ✓ Adjusted {count} hit(s) in '{pat_name}' by {sign}{val_str}")
+
+    @command(
         "remove",
         "editing",
         "remove a note from steps",
@@ -1084,6 +1127,9 @@ class ChatInterface:
     )
     def cmd_clear(self, args: str):
         parts = args.split()
+        if not parts:
+            self._emit("Usage: clear <pattern> [steps]")
+            return
         pat_name = parts[0]
         if pat_name not in self.seq.patterns:
             self._emit(f"  Pattern '{pat_name}' not found")
@@ -2047,6 +2093,22 @@ class ChatInterface:
                 desc = macro.description or f"[{macro.scope}] {len(macro.commands)} commands"
                 self._emit(f"    {usage:36s} {desc}")
         self._emit("")
+
+    @command("reset", "other", "clear everything and start fresh")
+    def cmd_reset(self, args: str):
+        was_playing = self.seq.playing
+        if was_playing:
+            self.seq.stop()
+        self.seq.patterns.clear()
+        self._history.clear()
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._clipboard.clear()
+        self._next_id = 1
+        # Keep global macros, clear project macros
+        self._macros = {n: m for n, m in self._macros.items() if m.scope == "global"}
+        self._emit("  ✓ Reset — all patterns, history, and project macros cleared")
+        logger.info("Reset: cleared all patterns, history, project macros")
 
     @command("quit", "other", "shutdown", aliases=["exit"])
     def cmd_quit(self, args: str):
