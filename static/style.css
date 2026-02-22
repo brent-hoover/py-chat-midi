@@ -347,45 +347,44 @@ main {
     color: #555;
 }
 
-.piano-roll-wrap {
-    display: flex;
-    flex-direction: column;
+.midi-log-wrap {
     border-top: 1px solid #2a2a3e;
-    padding: 0.3rem;
-    max-height: 250px;
-    overflow: hidden;
-}
-
-.piano-roll-top {
-    display: flex;
-    flex-shrink: 0;
-}
-
-.piano-roll-corner {
-    width: 28px;
-    flex-shrink: 0;
-}
-
-.piano-roll-labels {
-    display: flex;
-    flex-direction: row;
-    gap: 0;
+    padding: 0.4rem 0.6rem;
+    max-height: 200px;
+    overflow-y: auto;
     font-family: monospace;
-    font-size: 0.6rem;
-    color: #777;
-    overflow: hidden;
+    font-size: 0.75rem;
+    line-height: 1.6;
 }
 
-.piano-roll-label {
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
+.midi-log-line {
+    white-space: pre;
+    color: #4ade80;
 }
 
-.piano-roll-canvas {
-    flex: 1;
-    width: 100%;
-    min-height: 180px;
+.midi-log-line:nth-child(4n+1) {
+    color: #4ade80;
+}
+
+.midi-log-line:nth-child(4n+3) {
+    color: #3bcc70;
+}
+
+.midi-log-empty {
+    color: #555;
+    font-style: italic;
+}
+
+.midi-log-wrap::-webkit-scrollbar {
+    width: 6px;
+}
+
+.midi-log-wrap::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.midi-log-wrap::-webkit-scrollbar-thumb {
+    background: #333;
     border-radius: 3px;
 }
 

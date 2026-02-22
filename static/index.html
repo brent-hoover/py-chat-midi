@@ -132,19 +132,20 @@ run &lt;file.txt&gt;        run command script</pre>
             </template>
         </div>
 
-        <!-- MIDI Piano Roll Monitor -->
+        <!-- MIDI Output Monitor -->
         <div class="midi-monitor">
             <div class="midi-monitor-header" @click="toggleMidiMonitor()">
                 <span class="collapse-icon" x-text="showMidi ? '&#9660;' : '&#9654;'"></span>
                 <span class="midi-monitor-title">MIDI Output</span>
                 <span class="midi-monitor-hint" x-show="!showMidi">click to monitor</span>
             </div>
-            <div class="piano-roll-wrap" x-show="showMidi">
-                <div class="piano-roll-top">
-                    <div class="piano-roll-corner"></div>
-                    <div class="piano-roll-labels" x-ref="pianoLabels"></div>
+            <div class="midi-log-wrap" x-show="showMidi" x-ref="midiLogContainer">
+                <template x-for="(line, i) in midiLog" :key="i">
+                    <div class="midi-log-line" x-text="line"></div>
+                </template>
+                <div class="midi-log-empty" x-show="midiLog.length === 0">
+                    Waiting for MIDI output...
                 </div>
-                <canvas x-ref="pianoRoll" class="piano-roll-canvas"></canvas>
             </div>
         </div>
 

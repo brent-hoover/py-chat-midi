@@ -86,6 +86,8 @@ class Pattern:
         self.muted_notes: set[int] = set()
         self.swing = 0  # 0-100, applies to whole pattern
         self.swing_notes: dict[int, int] = {}  # note -> swing%, overrides pattern swing
+        self.cc_auto: dict[int, dict[int, int]] = {}  # {cc_number: {step: value}}
+        self.cc_interp: dict[int, str] = {}  # {cc_number: "linear"|"step"|"exp"}
 
     def set_step(self, step: int, note: int, velocity: int = 100, gate: int = 1):
         step = step % self.steps
@@ -107,6 +109,11 @@ class Pattern:
             'muted_notes': list(self.muted_notes),
             'swing': self.swing,
             'swing_notes': {str(k): v for k, v in self.swing_notes.items()},
+            'cc_auto': {
+                str(k): {str(s): v for s, v in kf.items()}
+                for k, kf in self.cc_auto.items()
+            },
+            'cc_interp': {str(k): v for k, v in self.cc_interp.items()},
             'data': {str(k): v for k, v in self.data.items()},
         }
 
@@ -117,6 +124,11 @@ class Pattern:
         pat.muted_notes = set(d.get('muted_notes', []))
         pat.swing = d.get('swing', 0)
         pat.swing_notes = {int(k): v for k, v in d.get('swing_notes', {}).items()}
+        pat.cc_auto = {
+            int(k): {int(s): v for s, v in kf.items()}
+            for k, kf in d.get('cc_auto', {}).items()
+        }
+        pat.cc_interp = {int(k): v for k, v in d.get('cc_interp', {}).items()}
         for step_str, notes in d['data'].items():
             pat.data[int(step_str)] = [tuple(n) for n in notes]
         return pat
@@ -177,7 +189,7 @@ class Sequencer:
     def _send(self, msg):
         self.port.send(msg)
 
-    def _fire_notes(self, pat, step_notes, now):
+    def _fire_notes(self, pat, step_notes, now, *, step=None, swing=0):
         """Send note_on for a pattern's step notes, skipping muted notes."""
         fired = []
         for note, vel, gate in step_notes:
@@ -189,13 +201,61 @@ class Sequencer:
             self._send(msg)
             off_time = now + self.step_duration * gate * 0.9
             self.active_notes.append((note, pat.channel, off_time))
-            fired.append({"note": note, "vel": vel, "ch": pat.channel})
+            note_name = midi_to_note_name(note)
+            fired.append({
+                "note": note, "name": note_name,
+                "vel": vel, "gate": gate, "ch": pat.channel,
+                "swing": swing,
+            })
         if fired:
             self._notify({
                 "type": "midi_out",
                 "pattern": pat.name,
+                "step": step if step is not None else -1,
                 "notes": fired,
             })
+
+    def _interpolate_cc(
+        self, keyframes: dict[int, int], step: int, total_steps: int, mode: str
+    ) -> int:
+        """Interpolate CC value at a given step from keyframes with wrap-around."""
+        if not keyframes:
+            return 0
+        sorted_steps = sorted(keyframes.keys())
+        if len(sorted_steps) == 1:
+            return keyframes[sorted_steps[0]]
+        step = step % total_steps
+        # Exact keyframe hit
+        if step in keyframes:
+            return keyframes[step]
+        # Find surrounding keyframes (with wrap-around)
+        prev_s = next_s = None
+        for s in sorted_steps:
+            if s < step:
+                prev_s = s
+            elif s > step and next_s is None:
+                next_s = s
+        if prev_s is None:
+            prev_s = sorted_steps[-1]  # wrap from end
+        if next_s is None:
+            next_s = sorted_steps[0]  # wrap to start
+        prev_v = keyframes[prev_s]
+        next_v = keyframes[next_s]
+        # Calculate fractional position between keyframes
+        if prev_s < next_s:
+            span = next_s - prev_s
+            pos = step - prev_s
+        else:
+            # Wrapped around
+            span = (total_steps - prev_s) + next_s
+            pos = (step - prev_s) % total_steps
+        t = pos / span if span > 0 else 0.0
+        if mode == "step":
+            return prev_v
+        elif mode == "exp":
+            t = t * t  # quadratic ease-in
+        # linear (or exp after t transformation)
+        return max(0, min(127, round(prev_v + (next_v - prev_v) * t)))
 
     def _all_notes_off(self):
         # Send note_off for every active note individually
@@ -235,11 +295,33 @@ class Sequencer:
             for pat in self.patterns.values():
                 if pat.muted:
                     continue
-                step_notes = pat.data.get(self.current_step % pat.steps, [])
+                cur = self.current_step % pat.steps
+
+                # Send CC automation before notes
+                if pat.cc_auto:
+                    cc_sent = []
+                    for cc_num, keyframes in pat.cc_auto.items():
+                        mode = pat.cc_interp.get(cc_num, "linear")
+                        val = self._interpolate_cc(keyframes, cur, pat.steps, mode)
+                        self._send(mido.Message(
+                            'control_change', channel=pat.channel,
+                            control=cc_num, value=val,
+                        ))
+                        cc_sent.append({"cc": cc_num, "value": val})
+                    if cc_sent:
+                        self._notify({
+                            "type": "midi_out",
+                            "pattern": pat.name,
+                            "step": cur,
+                            "notes": [],
+                            "cc": cc_sent,
+                        })
+
+                step_notes = pat.data.get(cur, [])
                 if not step_notes:
                     continue
                 if not is_odd_step:
-                    self._fire_notes(pat, step_notes, now)
+                    self._fire_notes(pat, step_notes, now, step=cur)
                 else:
                     # Group notes by their swing amount
                     straight = []
@@ -252,11 +334,13 @@ class Sequencer:
                         else:
                             by_swing.setdefault(sw, []).append(entry)
                     if straight:
-                        self._fire_notes(pat, straight, now)
+                        self._fire_notes(pat, straight, now, step=cur)
                     for sw_val, notes in by_swing.items():
                         delay = self.step_duration * (sw_val / 100) * 0.5
                         threading.Timer(
-                            delay, self._fire_notes, args=(pat, notes, now + delay)
+                            delay, self._fire_notes,
+                            args=(pat, notes, now + delay),
+                            kwargs={"step": cur, "swing": sw_val},
                         ).start()
 
             self.current_step += 1
@@ -374,6 +458,12 @@ class ChatInterface:
 ║    arp <pat> <notes> <style>                                     ║
 ║        style: up, down, updown, random                           ║
 ║                                                                  ║
+║  CC AUTOMATION                                                   ║
+║    auto <pat> cc<N> <step:val ...>  set keyframes                ║
+║    auto <pat> cc<N> interp <mode>   linear|step|exp              ║
+║    auto <pat> cc<N> clear           remove automation            ║
+║    auto <pat> list                  show CC lanes                ║
+║                                                                  ║
 ║  MIDI                                                            ║
 ║    cc <ch> <cc#> <val>     send control change                   ║
 ║    pc <ch> <program>       send program change                   ║
@@ -453,6 +543,21 @@ class ChatInterface:
         # Step numbers
         nums = "".join(f"{s:3d}" for s in range(pat.steps))
         self._emit(f"  {'':>4} │{nums}│")
+
+        # CC automation lanes
+        if pat.cc_auto:
+            self._emit(f"  {'─' * (pat.steps * 3 + 4)}")
+            for cc_num in sorted(pat.cc_auto):
+                keyframes = pat.cc_auto[cc_num]
+                mode = pat.cc_interp.get(cc_num, "linear")
+                label = f"CC{cc_num}".rjust(4)
+                row = ""
+                for s in range(pat.steps):
+                    if s in keyframes:
+                        row += f"{keyframes[s]:3d}"
+                    else:
+                        row += " · "
+                self._emit(f"  {label} │{row}│ ({mode})")
 
     def euclidean_rhythm(self, hits: int, steps: int) -> list[int]:
         """Bjorklund's algorithm for Euclidean rhythms."""
@@ -535,6 +640,90 @@ class ChatInterface:
             pat.set_step(s, note, 100)
 
         self._emit(f"  ✓ Arp '{style}' across {pat.steps} steps")
+
+    def cmd_auto(self, args: str):
+        parts = args.split()
+        if len(parts) < 2:
+            self._emit(
+                "Usage: auto <pattern> cc<N> <step:val ...>\n"
+                "       auto <pattern> cc<N> interp <linear|step|exp>\n"
+                "       auto <pattern> cc<N> clear\n"
+                "       auto <pattern> list"
+            )
+            return
+        pat_name = parts[0]
+        if pat_name not in self.seq.patterns:
+            self._emit(f"  Pattern '{pat_name}' not found")
+            return
+        pat = self.seq.patterns[pat_name]
+
+        # auto <pat> list
+        if parts[1] == 'list':
+            if not pat.cc_auto:
+                self._emit(f"  No CC automation on '{pat_name}'")
+                return
+            for cc_num in sorted(pat.cc_auto):
+                mode = pat.cc_interp.get(cc_num, "linear")
+                kf = pat.cc_auto[cc_num]
+                kf_str = " ".join(f"{s}:{v}" for s, v in sorted(kf.items()))
+                self._emit(f"  CC{cc_num} ({mode}): {kf_str}")
+            return
+
+        # Parse cc number from cc<N>
+        cc_match = re.match(r'^cc(\d+)$', parts[1], re.IGNORECASE)
+        if not cc_match:
+            self._emit(f"  Expected cc<N>, got '{parts[1]}'")
+            return
+        cc_num = int(cc_match.group(1))
+        if not 0 <= cc_num <= 127:
+            self._emit(f"  CC number must be 0-127, got {cc_num}")
+            return
+
+        if len(parts) < 3:
+            self._emit("  Expected: step:value pairs, 'interp <mode>', or 'clear'")
+            return
+
+        # auto <pat> cc<N> clear
+        if parts[2] == 'clear':
+            pat.cc_auto.pop(cc_num, None)
+            pat.cc_interp.pop(cc_num, None)
+            self._emit(f"  ✓ Cleared CC{cc_num} automation on '{pat_name}'")
+            return
+
+        # auto <pat> cc<N> interp <mode>
+        if parts[2] == 'interp':
+            if len(parts) < 4:
+                self._emit("  Usage: auto <pat> cc<N> interp <linear|step|exp>")
+                return
+            mode = parts[3].lower()
+            if mode not in ('linear', 'step', 'exp'):
+                self._emit(f"  Unknown mode '{mode}'. Use: linear, step, exp")
+                return
+            pat.cc_interp[cc_num] = mode
+            self._emit(f"  ✓ CC{cc_num} interpolation → {mode}")
+            return
+
+        # auto <pat> cc<N> <step:val> [step:val ...]
+        keyframes = {}
+        for token in parts[2:]:
+            kf_match = re.match(r'^(\d+):(\d+)$', token)
+            if not kf_match:
+                self._emit(f"  Invalid keyframe '{token}', expected step:value")
+                return
+            step = int(kf_match.group(1))
+            val = int(kf_match.group(2))
+            if not 0 <= val <= 127:
+                self._emit(f"  Value must be 0-127, got {val}")
+                return
+            keyframes[step % pat.steps] = val
+
+        if cc_num not in pat.cc_auto:
+            pat.cc_auto[cc_num] = {}
+        pat.cc_auto[cc_num].update(keyframes)
+        if cc_num not in pat.cc_interp:
+            pat.cc_interp[cc_num] = "linear"
+        kf_str = " ".join(f"{s}:{v}" for s, v in sorted(pat.cc_auto[cc_num].items()))
+        self._emit(f"  ✓ CC{cc_num} on '{pat_name}': {kf_str}")
 
     def handle(self, line: str) -> tuple[bool, list[str]]:
         self._output = []
@@ -777,6 +966,9 @@ class ChatInterface:
 
             elif cmd == 'arp':
                 self.cmd_arp(args)
+
+            elif cmd == 'auto':
+                self.cmd_auto(args)
 
             elif cmd == 'cc':
                 parts = args.split()
