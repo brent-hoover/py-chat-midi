@@ -136,6 +136,10 @@ function sequencer() {
                 if (msg.macro_saved) {
                     this.macroEditor.open = false;
                 }
+                if (msg.clear_log) {
+                    this.log = [];
+                    this.scrollLog();
+                }
             } else if (msg.type === 'midi_out') {
                 if (this.showMidi) {
                     this._pendingMidiNotes.push({
@@ -364,7 +368,7 @@ function sequencer() {
                     body: text,
                 });
                 const result = await res.json();
-                this.log.push(`  \u2713 ${result.message}`);
+                this.log = [`  \u2713 ${result.message}`];
                 this.scrollLog();
             } catch (err) {
                 this.log.push(`Error loading: ${err.message}`);
@@ -556,6 +560,20 @@ function sequencer() {
             const stepData = pat.data[String(step)];
             if (!stepData) return false;
             return stepData.some(([n]) => n === note);
+        },
+
+        getVelocity(pat, step, note) {
+            if (!pat) return 0;
+            const stepData = pat.data[String(step)];
+            if (!stepData) return 0;
+            const entry = stepData.find(([n]) => n === note);
+            return entry ? entry[1] : 0;
+        },
+
+        velOpacity(pat, step, note) {
+            const vel = this.getVelocity(pat, step, note);
+            // Map 0-127 to 0.35-1.0
+            return 0.35 + (vel / 127) * 0.65;
         },
 
         get patternNames() {

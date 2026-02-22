@@ -39,9 +39,9 @@ DRUM_MAP = {
 }
 _GM_DRUM_DEFAULTS = dict(DRUM_MAP)  # immutable copy for drummap replacements
 OCTAVE_PRESETS = {
-    "element": 0,   # MIDI 60 = C5 (Element, current default)
-    "yamaha": -1,    # MIDI 60 = C4 (Yamaha, Roland, Logic)
-    "ableton": -2,   # MIDI 60 = C3 (Ableton, Battery, FL Studio)
+    "element": 0,  # MIDI 60 = C5 (Element, current default)
+    "yamaha": -1,  # MIDI 60 = C4 (Yamaha, Roland, Logic)
+    "ableton": -2,  # MIDI 60 = C3 (Ableton, Battery, FL Studio)
 }
 
 SCALE_INTERVALS = {
@@ -1215,7 +1215,13 @@ class ChatInterface:
             self._emit(f"  Pattern '{pat_name}' not found")
             return
         pat = self.seq.patterns[pat_name]
-        val = max(0, min(100, int(parts[1])))
+        try:
+            val = int(parts[1])
+        except ValueError:
+            self._emit("  Swing amount must be 0-100, not a step range")
+            self._emit("  Usage: swing <pattern> <0-100> [note]")
+            return
+        val = max(0, min(100, val))
         if len(parts) >= 3:
             note = self._parse_notes(parts[2])[0]
             if val == 0:
@@ -1855,6 +1861,7 @@ class ChatInterface:
                 self._macros[name] = macro
         n_pat = len(self.seq.patterns)
         self._emit(f"  ✓ Loaded from {path} ({n_pat} patterns, {self.seq.bpm} BPM)")
+        self.seq._notify({"type": "ui", "clear_log": True})
 
     @command("run", "other", "run a command script", usage="run <file>", hint_args=["<file.txt>"])
     def cmd_run(self, args: str):

@@ -140,7 +140,8 @@ run &lt;file.txt&gt;        run command script</pre>
                                                                 'filled': hasNoteIn(patterns[name], step - 1, note),
                                                                 'playhead': playing && (currentStep % patterns[name].steps) === (step - 1),
                                                                 'beat': (step - 1) % 4 === 0
-                                                            }">
+                                                            }"
+                                                            :style="hasNoteIn(patterns[name], step - 1, note) ? { opacity: velOpacity(patterns[name], step - 1, note) } : {}">
                                                             <span class="cell-dot"
                                                                   x-text="hasNoteIn(patterns[name], step - 1, note) ? '\u25A0' : '\u00B7'"></span>
                                                         </td>
