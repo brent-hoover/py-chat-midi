@@ -24,6 +24,7 @@ function sequencer() {
         // Lifecycle
         init() {
             this.connect();
+            this.loadCommandMeta();
         },
 
         connect() {
@@ -32,6 +33,26 @@ function sequencer() {
             this.ws.onmessage = (e) => this.onMessage(JSON.parse(e.data));
             this.ws.onclose = () => setTimeout(() => this.connect(), 1000);
             this.ws.onerror = () => {};
+        },
+
+        async loadCommandMeta() {
+            try {
+                const res = await fetch('/api/commands');
+                const data = await res.json();
+                this.commands = [];
+                this.hints = {};
+                for (const cmd of data) {
+                    this.commands.push(cmd.name);
+                    for (const alias of (cmd.aliases || [])) {
+                        this.commands.push(alias);
+                    }
+                    if (cmd.hint_args && cmd.hint_args.length > 0) {
+                        this.hints[cmd.name] = [cmd.name, ...cmd.hint_args];
+                    }
+                }
+            } catch (err) {
+                // Fallback: commands will be empty until server responds
+            }
         },
 
         onMessage(msg) {
@@ -55,6 +76,11 @@ function sequencer() {
                 if (!msg.playing) {
                     this.currentStep = -1;
                 }
+            } else if (msg.type === 'ui') {
+                if (msg.toggle === 'midi') this.toggleMidiMonitor();
+                if (msg.toggle === 'help') this.showHelp = !this.showHelp;
+                if (msg.fold) this.collapsedPatterns[msg.fold] = true;
+                if (msg.unfold) this.collapsedPatterns[msg.unfold] = false;
             } else if (msg.type === 'midi_out') {
                 if (this.showMidi) {
                     this._pendingMidiNotes.push({
@@ -80,16 +106,12 @@ function sequencer() {
             this.commandInput = '';
         },
 
-        commands: [
-            'play', 'stop', 'bpm', 'new', 'list', 'delete', 'mute', 'unmute',
-            'solo', 'put', 'vel', 'remove', 'clear', 'replace', 'show',
-            'euclid', 'arp', 'auto', 'swing', 'cc', 'pc', 'panic', 'ports',
-            'drums', 'drummap', 'save', 'load', 'run', 'help', 'quit',
-        ],
+        commands: [],
         drumNames: [
             'kick', 'snare', 'clap', 'hihat', 'ohh', 'tom1', 'tom2', 'tom3',
             'crash', 'ride', 'cowbell', 'rimshot',
         ],
+        hints: {},
 
         handleCommandKeydown(event) {
             if (event.key === 'Tab') {
@@ -353,35 +375,10 @@ function sequencer() {
             const argc = parts.length - 1;
             const patNames = Object.keys(this.patterns);
 
-            const hints = {
-                bpm:     ['bpm', '<tempo>'],
-                new:     ['new', '<name>', '[steps=16]', '[channel=0]'],
-                delete:  ['delete', '<pattern>'],
-                put:     ['put', '<pattern>', '<steps>', '<notes>', '[vel=100]', '[gate=1]'],
-                vel:     ['vel', '<pattern>', '<steps>', '<note>', '<velocity>'],
-                remove:  ['remove', '<pattern>', '<steps>', '<note>'],
-                clear:   ['clear', '<pattern>', '[steps]'],
-                replace: ['replace', '<pattern>', '<old_note>', '<new_note>'],
-                show:    ['show', '<pattern>'],
-                mute:    ['mute', '<pattern>', '[note]'],
-                unmute:  ['unmute', '[pattern]'],
-                solo:    ['solo', '<pattern>', '[note]'],
-                swing:   ['swing', '<pattern>', '<0-100>', '[note]'],
-                euclid:  ['euclid', '<pattern>', '<hits>', '[notes]', '[vel]'],
-                arp:     ['arp', '<pattern>', '<notes>', '<up|down|updown|random>'],
-                auto:    ['auto', '<pattern>', 'cc<N>', '<step:val ...>'],
-                cc:      ['cc', '<channel>', '<cc#>', '<value>'],
-                pc:      ['pc', '<channel>', '<program>'],
-                drummap: ['drummap', '<name>', '<note>', '| reset'],
-                save:    ['save', '[file.json]'],
-                load:    ['load', '<file.json>'],
-                run:     ['run', '<file.txt>'],
-            };
-
-            const schema = hints[cmd];
+            const schema = this.hints[cmd];
             if (!schema) {
                 if (argc === 0) {
-                    const matches = Object.keys(hints).filter(c => c.startsWith(cmd));
+                    const matches = Object.keys(this.hints).filter(c => c.startsWith(cmd));
                     if (matches.length > 0 && matches.length <= 5) {
                         return matches.join('  ');
                     }

@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from sequencer import ChatInterface, Pattern
+from sequencer import DRUM_MAP, ChatInterface, Pattern, _command_registry
 
 AUTOSAVE_PATH = Path(__file__).parent / ".autosave.json"
 
@@ -29,6 +29,7 @@ def _autosave():
             "bpm": chat.seq.bpm,
             "steps_per_beat": chat.seq.steps_per_beat,
             "patterns": {name: pat.to_dict() for name, pat in chat.seq.patterns.items()},
+            "drum_map": dict(DRUM_MAP),
         }
         AUTOSAVE_PATH.write_text(json.dumps(data))
     except Exception:
@@ -46,6 +47,9 @@ def _autoload():
         chat.seq.patterns.clear()
         for name, pat_dict in data["patterns"].items():
             chat.seq.patterns[name] = Pattern.from_dict(pat_dict)
+        if "drum_map" in data:
+            DRUM_MAP.clear()
+            DRUM_MAP.update(data["drum_map"])
         n = len(chat.seq.patterns)
         print(f"  ✓ Restored {n} pattern(s) from autosave ({chat.seq.bpm} BPM)")
     except Exception:
@@ -170,6 +174,23 @@ async def ai_translate(req: AIRequest):
     return {"commands": commands, "output": all_output}
 
 
+@app.get("/api/commands")
+async def get_commands():
+    """Return command registry as JSON for client tab-completion."""
+    return [
+        {
+            "name": c.name,
+            "category": c.category,
+            "description": c.description,
+            "usage": c.usage,
+            "aliases": c.aliases,
+            "hint_args": c.hint_args,
+            "hidden": c.hidden,
+        }
+        for c in _command_registry
+    ]
+
+
 @app.get("/api/session")
 async def get_session():
     """Download the current session as JSON."""
@@ -177,6 +198,7 @@ async def get_session():
         "bpm": chat.seq.bpm,
         "steps_per_beat": chat.seq.steps_per_beat,
         "patterns": {name: pat.to_dict() for name, pat in chat.seq.patterns.items()},
+        "drum_map": dict(DRUM_MAP),
     }
 
 
@@ -190,6 +212,9 @@ async def load_session(req: dict):
 
     for name, pat_dict in req["patterns"].items():
         chat.seq.patterns[name] = Pattern.from_dict(pat_dict)
+    if "drum_map" in req:
+        DRUM_MAP.clear()
+        DRUM_MAP.update(req["drum_map"])
     await broadcast(chat.seq.get_state())
     n_pat = len(chat.seq.patterns)
     return {"message": f"Loaded {n_pat} patterns, {chat.seq.bpm} BPM"}
