@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from sequencer import DRUM_MAP, ChatInterface, Pattern, _command_registry
+from sequencer import DRUM_MAP, ChatInterface, Macro, Pattern, _command_registry
 
 AUTOSAVE_PATH = Path(__file__).parent / ".autosave.json"
 
@@ -25,11 +25,13 @@ clients: set[WebSocket] = set()
 def _autosave():
     """Persist current state so it survives reloads."""
     try:
+        project_macros = {n: m.to_dict() for n, m in chat._macros.items() if m.scope == "project"}
         data = {
             "bpm": chat.seq.bpm,
             "steps_per_beat": chat.seq.steps_per_beat,
             "patterns": {name: pat.to_dict() for name, pat in chat.seq.patterns.items()},
             "drum_map": dict(DRUM_MAP),
+            "macros": project_macros,
         }
         AUTOSAVE_PATH.write_text(json.dumps(data))
     except Exception:
@@ -50,6 +52,11 @@ def _autoload():
         if "drum_map" in data:
             DRUM_MAP.clear()
             DRUM_MAP.update(data["drum_map"])
+        if "macros" in data:
+            for name, mdata in data["macros"].items():
+                macro = Macro.from_dict(mdata)
+                macro.scope = "project"
+                chat._macros[name] = macro
         n = len(chat.seq.patterns)
         print(f"  ✓ Restored {n} pattern(s) from autosave ({chat.seq.bpm} BPM)")
     except Exception:
@@ -60,7 +67,7 @@ _autoload()
 
 
 def _shutdown():
-    """Autosave state, stop MIDI, close port."""
+    """Autosave state, close GUIs, stop MIDI, close port."""
     _autosave()
     chat.seq.close()
 
@@ -110,11 +117,48 @@ async def websocket_endpoint(ws: WebSocket):
             data = await ws.receive_text()
             msg = json.loads(data)
             if msg.get("type") == "command":
-                cont, output = chat.handle(msg["line"])
-                for line in output:
-                    await broadcast({"type": "output", "text": line})
+                line = msg["line"]
+                cont, output = await asyncio.to_thread(chat.handle, line)
+                for out_line in output:
+                    await broadcast({"type": "output", "text": out_line})
                 # Broadcast updated state after command
                 await broadcast(chat.seq.get_state())
+            elif msg.get("type") == "macro_save":
+                name = msg["name"]
+                commands = [c.strip() for c in msg["commands"] if c.strip()]
+                params = chat._extract_params(commands)
+                if name in chat._commands:
+                    await ws.send_text(
+                        json.dumps(
+                            {
+                                "type": "output",
+                                "text": f"  '{name}' is a built-in command, choose another name",
+                            }
+                        )
+                    )
+                elif commands:
+                    existing = chat._macros.get(name)
+                    scope = existing.scope if existing else "project"
+                    chat._macros[name] = Macro(
+                        name=name,
+                        commands=commands,
+                        params=params,
+                        scope=scope,
+                    )
+                    if scope == "global":
+                        chat._save_global_macro(chat._macros[name])
+                    n = len(commands)
+                    await broadcast(
+                        {
+                            "type": "output",
+                            "text": f"  ✓ Saved macro '{name}' ({n} commands)",
+                        }
+                    )
+                    await broadcast({"type": "ui", "macro_saved": name})
+                else:
+                    await broadcast(
+                        {"type": "output", "text": f"  Macro '{name}' has no commands, not saved"}
+                    )
     except WebSocketDisconnect:
         clients.discard(ws)
 
@@ -194,11 +238,13 @@ async def get_commands():
 @app.get("/api/session")
 async def get_session():
     """Download the current session as JSON."""
+    project_macros = {n: m.to_dict() for n, m in chat._macros.items() if m.scope == "project"}
     return {
         "bpm": chat.seq.bpm,
         "steps_per_beat": chat.seq.steps_per_beat,
         "patterns": {name: pat.to_dict() for name, pat in chat.seq.patterns.items()},
         "drum_map": dict(DRUM_MAP),
+        "macros": project_macros,
     }
 
 
@@ -215,13 +261,18 @@ async def load_session(req: dict):
     if "drum_map" in req:
         DRUM_MAP.clear()
         DRUM_MAP.update(req["drum_map"])
+    if "macros" in req:
+        for name, mdata in req["macros"].items():
+            macro = Macro.from_dict(mdata)
+            macro.scope = "project"
+            chat._macros[name] = macro
     await broadcast(chat.seq.get_state())
     n_pat = len(chat.seq.patterns)
     return {"message": f"Loaded {n_pat} patterns, {chat.seq.bpm} BPM"}
 
 
 # Serve static files — resolve path for both dev and PyInstaller bundle
-_base = Path(getattr(sys, '_MEIPASS', Path(__file__).parent))
+_base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
 static_dir = _base / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 

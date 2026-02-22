@@ -13,6 +13,7 @@ function sequencer() {
         collapsedPatterns: {},
         showHelp: false,
         showMidi: false,
+        macroEditor: { open: false, name: '', commands: '', params: [] },
         midiLog: [],                // scrolling text MIDI output
         midiLogMax: 200,
         _pendingMidiNotes: [],      // accumulator for current step
@@ -81,6 +82,17 @@ function sequencer() {
                 if (msg.toggle === 'help') this.showHelp = !this.showHelp;
                 if (msg.fold) this.collapsedPatterns[msg.fold] = true;
                 if (msg.unfold) this.collapsedPatterns[msg.unfold] = false;
+                if (msg.macro_edit) {
+                    this.macroEditor = {
+                        open: true,
+                        name: msg.macro_edit,
+                        commands: (msg.commands || []).join('\n'),
+                        params: msg.params || [],
+                    };
+                }
+                if (msg.macro_saved) {
+                    this.macroEditor.open = false;
+                }
             } else if (msg.type === 'midi_out') {
                 if (this.showMidi) {
                     this._pendingMidiNotes.push({
@@ -317,6 +329,19 @@ function sequencer() {
 
         togglePattern(name) {
             this.collapsedPatterns[name] = !this.collapsedPatterns[name];
+        },
+
+        saveMacro() {
+            const commands = this.macroEditor.commands.split('\n').filter(l => l.trim());
+            this.ws.send(JSON.stringify({
+                type: 'macro_save',
+                name: this.macroEditor.name,
+                commands,
+            }));
+        },
+
+        cancelMacroEdit() {
+            this.macroEditor.open = false;
         },
 
         isCollapsed(name) {

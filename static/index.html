@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>py-chat-midi</title>
+    <title>Syntax</title>
     <link rel="stylesheet" href="https://unpkg.com/oat-css@latest/dist/oat.min.css">
     <link rel="stylesheet" href="/static/style.css">
     <script src="https://unpkg.com/oat-css@latest/dist/oat.min.js"></script>
@@ -70,6 +70,22 @@ run &lt;file.txt&gt;        run command script</pre>
 0-15        range
 0-15:2      range with stride</pre>
                 </div>
+            </div>
+        </div>
+
+        <!-- Macro Editor -->
+        <div class="macro-editor" x-show="macroEditor.open" x-transition>
+            <div class="macro-editor-header">
+                <span class="macro-editor-title">Macro: <strong x-text="macroEditor.name"></strong></span>
+                <span class="macro-editor-params"
+                      x-text="(() => { const m = macroEditor.commands.match(/\$\{(\w+)\}/g); if (!m) return ''; const p = [...new Set(m.map(s => s.slice(2,-1)))]; return 'Params: ' + p.join(', '); })()"></span>
+            </div>
+            <textarea class="macro-editor-textarea" x-model="macroEditor.commands"
+                      placeholder="One command per line. Use ${name} for parameters."
+                      rows="10"></textarea>
+            <div class="macro-editor-actions">
+                <button class="btn-session" @click="saveMacro()">Save</button>
+                <button class="btn-session" @click="cancelMacroEdit()">Cancel</button>
             </div>
         </div>
 

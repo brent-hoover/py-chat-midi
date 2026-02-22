@@ -538,6 +538,57 @@ main {
     white-space: pre-wrap;
 }
 
+/* ── Macro Editor ─────────────────────────────────────── */
+.macro-editor {
+    background: #1a1a2e;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 0.8rem 1rem;
+}
+
+.macro-editor-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+    font-family: monospace;
+    font-size: 0.85rem;
+}
+
+.macro-editor-title {
+    color: var(--filled);
+}
+
+.macro-editor-params {
+    color: #888;
+    font-size: 0.75rem;
+}
+
+.macro-editor-textarea {
+    width: 100%;
+    background: #111;
+    color: #e0e0e0;
+    border: 1px solid #333;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    padding: 0.5rem;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.macro-editor-textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.macro-editor-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
 /* ── Responsive ───────────────────────────────────────── */
 @media (max-width: 600px) {
     .input-row {

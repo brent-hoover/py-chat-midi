@@ -22,34 +22,49 @@ import mido
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 DRUM_MAP = {
-    'kick': 36, 'snare': 38, 'clap': 39, 'hihat': 42,
-    'ohh': 46, 'tom1': 48, 'tom2': 45, 'tom3': 43,
-    'crash': 49, 'ride': 51, 'cowbell': 56, 'rimshot': 37,
+    "kick": 36,
+    "snare": 38,
+    "clap": 39,
+    "hihat": 42,
+    "ohh": 46,
+    "tom1": 48,
+    "tom2": 45,
+    "tom3": 43,
+    "crash": 49,
+    "ride": 51,
+    "cowbell": 56,
+    "rimshot": 37,
 }
 SCALE_INTERVALS = {
-    'major':       [0, 2, 4, 5, 7, 9, 11],
-    'minor':       [0, 2, 3, 5, 7, 8, 10],
-    'dorian':      [0, 2, 3, 5, 7, 9, 10],
-    'mixolydian':  [0, 2, 4, 5, 7, 9, 10],
-    'pentatonic':  [0, 2, 4, 7, 9],
-    'blues':       [0, 3, 5, 6, 7, 10],
-    'chromatic':   list(range(12)),
+    "major": [0, 2, 4, 5, 7, 9, 11],
+    "minor": [0, 2, 3, 5, 7, 8, 10],
+    "dorian": [0, 2, 3, 5, 7, 9, 10],
+    "mixolydian": [0, 2, 4, 5, 7, 9, 10],
+    "pentatonic": [0, 2, 4, 7, 9],
+    "blues": [0, 3, 5, 6, 7, 10],
+    "chromatic": list(range(12)),
 }
 
 CATEGORY_ORDER = [
-    "transport", "patterns", "editing", "generators",
-    "cc automation", "midi", "other",
+    "transport",
+    "patterns",
+    "editing",
+    "generators",
+    "cc automation",
+    "midi",
+    "other",
 ]
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def note_name_to_midi(name: str) -> int:
     """Convert e.g. 'C4', 'F#3', 'Bb5' to MIDI note number."""
-    name = name.strip().replace('b', '#')  # normalize flats crudely
+    name = name.strip().replace("b", "#")  # normalize flats crudely
     # handle double-sharp edge cases? nah.
-    match = re.match(r'^([A-G]#?)(-?\d+)$', name, re.IGNORECASE)
+    match = re.match(r"^([A-G]#?)(-?\d+)$", name, re.IGNORECASE)
     if not match:
         raise ValueError(f"Invalid note name: {name}")
     pitch, octave = match.group(1).upper(), int(match.group(2))
@@ -63,7 +78,7 @@ def midi_to_note_name(midi_num: int) -> str:
 
 def parse_note_list(text: str) -> list[int]:
     """Parse a space/comma separated list of note names or MIDI numbers."""
-    tokens = re.split(r'[\s,]+', text.strip())
+    tokens = re.split(r"[\s,]+", text.strip())
     notes = []
     for t in tokens:
         if not t:
@@ -78,6 +93,7 @@ def parse_note_list(text: str) -> list[int]:
 
 
 # ─── Pattern ──────────────────────────────────────────────────────────────────
+
 
 class Pattern:
     """A pattern is a fixed-length step sequence on a single MIDI channel."""
@@ -108,34 +124,32 @@ class Pattern:
 
     def to_dict(self) -> dict:
         return {
-            'name': self.name,
-            'steps': self.steps,
-            'channel': self.channel,
-            'muted': self.muted,
-            'muted_notes': list(self.muted_notes),
-            'swing': self.swing,
-            'swing_notes': {str(k): v for k, v in self.swing_notes.items()},
-            'cc_auto': {
-                str(k): {str(s): v for s, v in kf.items()}
-                for k, kf in self.cc_auto.items()
+            "name": self.name,
+            "steps": self.steps,
+            "channel": self.channel,
+            "muted": self.muted,
+            "muted_notes": list(self.muted_notes),
+            "swing": self.swing,
+            "swing_notes": {str(k): v for k, v in self.swing_notes.items()},
+            "cc_auto": {
+                str(k): {str(s): v for s, v in kf.items()} for k, kf in self.cc_auto.items()
             },
-            'cc_interp': {str(k): v for k, v in self.cc_interp.items()},
-            'data': {str(k): v for k, v in self.data.items()},
+            "cc_interp": {str(k): v for k, v in self.cc_interp.items()},
+            "data": {str(k): v for k, v in self.data.items()},
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'Pattern':
-        pat = cls(d['name'], d['steps'], d['channel'])
-        pat.muted = d.get('muted', False)
-        pat.muted_notes = set(d.get('muted_notes', []))
-        pat.swing = d.get('swing', 0)
-        pat.swing_notes = {int(k): v for k, v in d.get('swing_notes', {}).items()}
+    def from_dict(cls, d: dict) -> "Pattern":
+        pat = cls(d["name"], d["steps"], d["channel"])
+        pat.muted = d.get("muted", False)
+        pat.muted_notes = set(d.get("muted_notes", []))
+        pat.swing = d.get("swing", 0)
+        pat.swing_notes = {int(k): v for k, v in d.get("swing_notes", {}).items()}
         pat.cc_auto = {
-            int(k): {int(s): v for s, v in kf.items()}
-            for k, kf in d.get('cc_auto', {}).items()
+            int(k): {int(s): v for s, v in kf.items()} for k, kf in d.get("cc_auto", {}).items()
         }
-        pat.cc_interp = {int(k): v for k, v in d.get('cc_interp', {}).items()}
-        for step_str, notes in d['data'].items():
+        pat.cc_interp = {int(k): v for k, v in d.get("cc_interp", {}).items()}
+        for step_str, notes in d["data"].items():
             pat.data[int(step_str)] = [tuple(n) for n in notes]
         return pat
 
@@ -145,6 +159,7 @@ class Pattern:
 
 
 # ─── Sequencer Engine ─────────────────────────────────────────────────────────
+
 
 class Sequencer:
     def __init__(self, port_name: str = "Chat Sequencer"):
@@ -201,25 +216,30 @@ class Sequencer:
         for note, vel, gate in step_notes:
             if note in pat.muted_notes:
                 continue
-            msg = mido.Message(
-                'note_on', note=note, channel=pat.channel, velocity=vel
-            )
+            msg = mido.Message("note_on", note=note, channel=pat.channel, velocity=vel)
             self._send(msg)
             off_time = now + self.step_duration * gate * 0.9
             self.active_notes.append((note, pat.channel, off_time))
             note_name = midi_to_note_name(note)
-            fired.append({
-                "note": note, "name": note_name,
-                "vel": vel, "gate": gate, "ch": pat.channel,
-                "swing": swing,
-            })
+            fired.append(
+                {
+                    "note": note,
+                    "name": note_name,
+                    "vel": vel,
+                    "gate": gate,
+                    "ch": pat.channel,
+                    "swing": swing,
+                }
+            )
         if fired:
-            self._notify({
-                "type": "midi_out",
-                "pattern": pat.name,
-                "step": step if step is not None else -1,
-                "notes": fired,
-            })
+            self._notify(
+                {
+                    "type": "midi_out",
+                    "pattern": pat.name,
+                    "step": step if step is not None else -1,
+                    "notes": fired,
+                }
+            )
 
     def _interpolate_cc(
         self, keyframes: dict[int, int], step: int, total_steps: int, mode: str
@@ -266,10 +286,10 @@ class Sequencer:
     def _all_notes_off(self):
         # Send note_off for every active note individually
         for note, ch, _off_time in self.active_notes:
-            self._send(mido.Message('note_off', note=note, channel=ch, velocity=0))
+            self._send(mido.Message("note_off", note=note, channel=ch, velocity=0))
         # Then CC123 (all notes off) on all channels as a safety net
         for ch in range(16):
-            self._send(mido.Message('control_change', channel=ch, control=123, value=0))
+            self._send(mido.Message("control_change", channel=ch, control=123, value=0))
 
     def _kill_thread(self):
         """Ensure the playback thread is fully stopped."""
@@ -287,7 +307,7 @@ class Sequencer:
             still_active = []
             for note, ch, off_time in self.active_notes:
                 if now >= off_time:
-                    self._send(mido.Message('note_off', note=note, channel=ch, velocity=0))
+                    self._send(mido.Message("note_off", note=note, channel=ch, velocity=0))
                 else:
                     still_active.append((note, ch, off_time))
             self.active_notes = still_active
@@ -309,19 +329,25 @@ class Sequencer:
                     for cc_num, keyframes in pat.cc_auto.items():
                         mode = pat.cc_interp.get(cc_num, "linear")
                         val = self._interpolate_cc(keyframes, cur, pat.steps, mode)
-                        self._send(mido.Message(
-                            'control_change', channel=pat.channel,
-                            control=cc_num, value=val,
-                        ))
+                        self._send(
+                            mido.Message(
+                                "control_change",
+                                channel=pat.channel,
+                                control=cc_num,
+                                value=val,
+                            )
+                        )
                         cc_sent.append({"cc": cc_num, "value": val})
                     if cc_sent:
-                        self._notify({
-                            "type": "midi_out",
-                            "pattern": pat.name,
-                            "step": cur,
-                            "notes": [],
-                            "cc": cc_sent,
-                        })
+                        self._notify(
+                            {
+                                "type": "midi_out",
+                                "pattern": pat.name,
+                                "step": cur,
+                                "notes": [],
+                                "cc": cc_sent,
+                            }
+                        )
 
                 step_notes = pat.data.get(cur, [])
                 if not step_notes:
@@ -344,7 +370,8 @@ class Sequencer:
                     for sw_val, notes in by_swing.items():
                         delay = self.step_duration * (sw_val / 100) * 0.5
                         threading.Timer(
-                            delay, self._fire_notes,
+                            delay,
+                            self._fire_notes,
                             args=(pat, notes, now + delay),
                             kwargs={"step": cur, "swing": sw_val},
                         ).start()
@@ -385,41 +412,74 @@ class Sequencer:
         self.port.close()
 
     def get_state(self) -> dict:
-        return {
+        state = {
             "type": "state",
             "bpm": self.bpm,
             "playing": self.playing,
             "patterns": {name: pat.to_dict() for name, pat in self.patterns.items()},
         }
+        return state
 
     def save(self, filepath: str):
         data = {
-            'bpm': self.bpm,
-            'steps_per_beat': self.steps_per_beat,
-            'patterns': {name: pat.to_dict() for name, pat in self.patterns.items()},
-            'drum_map': dict(DRUM_MAP),
+            "bpm": self.bpm,
+            "steps_per_beat": self.steps_per_beat,
+            "patterns": {name: pat.to_dict() for name, pat in self.patterns.items()},
+            "drum_map": dict(DRUM_MAP),
         }
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'w') as f:
+        with open(path, "w") as f:
             json.dump(data, f, indent=2)
         return str(path)
 
     def load(self, filepath: str):
         with open(filepath) as f:
             data = json.load(f)
-        self.bpm = data['bpm']
-        self.steps_per_beat = data.get('steps_per_beat', 4)
+        self.bpm = data["bpm"]
+        self.steps_per_beat = data.get("steps_per_beat", 4)
         self.patterns.clear()
-        for name, pat_dict in data['patterns'].items():
+        for name, pat_dict in data["patterns"].items():
             self.patterns[name] = Pattern.from_dict(pat_dict)
-        if 'drum_map' in data:
+        if "drum_map" in data:
             DRUM_MAP.clear()
-            DRUM_MAP.update(data['drum_map'])
+            DRUM_MAP.update(data["drum_map"])
         return str(filepath)
 
 
 # ─── Command Registry ────────────────────────────────────────────────────────
+
+
+@dataclass
+class Macro:
+    name: str
+    commands: list[str]
+    params: list[str]
+    description: str = ""
+    scope: str = "project"
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "commands": self.commands,
+            "params": self.params,
+            "description": self.description,
+            "scope": self.scope,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Macro":
+        return cls(
+            name=d["name"],
+            commands=d["commands"],
+            params=d.get("params", []),
+            description=d.get("description", ""),
+            scope=d.get("scope", "project"),
+        )
+
+
+MACROS_DIR = Path(__file__).parent / "macros"
+
 
 @dataclass
 class CommandDef:
@@ -446,21 +506,25 @@ def command(
     hidden: bool = False,
 ):
     def decorator(fn):
-        _command_registry.append(CommandDef(
-            name=name,
-            handler=fn.__name__,
-            category=category,
-            description=description,
-            usage=usage,
-            aliases=aliases or [],
-            hint_args=hint_args or [],
-            hidden=hidden,
-        ))
+        _command_registry.append(
+            CommandDef(
+                name=name,
+                handler=fn.__name__,
+                category=category,
+                description=description,
+                usage=usage,
+                aliases=aliases or [],
+                hint_args=hint_args or [],
+                hidden=hidden,
+            )
+        )
         return fn
+
     return decorator
 
 
 # ─── Chat Command Parser ─────────────────────────────────────────────────────
+
 
 class ChatInterface:
     """
@@ -477,6 +541,9 @@ class ChatInterface:
             self._commands[cmd_def.name] = cmd_def
             for alias in cmd_def.aliases:
                 self._commands[alias] = cmd_def
+        # Macros
+        self._macros: dict[str, Macro] = {}
+        self._load_global_macros()
 
     def _emit(self, text: str):
         self._output.append(text)
@@ -484,13 +551,79 @@ class ChatInterface:
     def _notify_state(self):
         self.seq._notify(self.seq.get_state())
 
+    # ── Macro helpers ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_params(commands: list[str]) -> list[str]:
+        """Extract ${...} parameter names from commands, in order of first appearance."""
+        seen: set[str] = set()
+        params: list[str] = []
+        for cmd in commands:
+            for m in re.finditer(r"\$\{(\w+)\}", cmd):
+                name = m.group(1)
+                if name not in seen:
+                    seen.add(name)
+                    params.append(name)
+        return params
+
+    def _load_global_macros(self):
+        """Load all macros from the global macros/ directory."""
+        if not MACROS_DIR.is_dir():
+            return
+        for path in MACROS_DIR.glob("*.json"):
+            try:
+                data = json.loads(path.read_text())
+                macro = Macro.from_dict(data)
+                macro.scope = "global"
+                self._macros[macro.name] = macro
+            except Exception:
+                pass
+
+    def _save_global_macro(self, macro: Macro):
+        """Save a macro to the global macros/ directory."""
+        MACROS_DIR.mkdir(parents=True, exist_ok=True)
+        path = MACROS_DIR / f"{macro.name}.json"
+        path.write_text(json.dumps(macro.to_dict(), indent=2))
+
+    def _delete_global_macro(self, name: str):
+        """Delete a macro file from the global macros/ directory."""
+        path = MACROS_DIR / f"{name}.json"
+        if path.exists():
+            path.unlink()
+
+    def _run_macro(self, macro: Macro, args_str: str):
+        """Parse key=value args, substitute into commands, and run each."""
+        # Parse key=value pairs
+        kwargs: dict[str, str] = {}
+        for token in args_str.split():
+            if "=" in token:
+                key, _, val = token.partition("=")
+                kwargs[key] = val
+
+        # Check for missing params
+        missing = [p for p in macro.params if p not in kwargs]
+        if missing:
+            self._emit(f"  Missing param(s): {', '.join(missing)}")
+            self._emit(f"  Usage: {macro.name} {' '.join(p + '=<val>' for p in macro.params)}")
+            return
+
+        # Substitute and run
+        self._emit(f"  ▶ Running macro '{macro.name}'")
+        for cmd_template in macro.commands:
+            cmd_line = cmd_template
+            for key, val in kwargs.items():
+                cmd_line = cmd_line.replace(f"${{{key}}}", val)
+            self._emit(f"  > {cmd_line}")
+            _, out = self.handle(cmd_line)
+            self._output.extend(out)
+
     def parse_steps(self, text: str, max_steps: int) -> list[int]:
         """Parse step specifiers: '0,4,8,12' or '0-7' or '0-15:2' (stride)."""
         steps = []
-        for part in text.split(','):
+        for part in text.split(","):
             part = part.strip()
-            if '-' in part:
-                range_match = re.match(r'(\d+)-(\d+)(?::(\d+))?', part)
+            if "-" in part:
+                range_match = re.match(r"(\d+)-(\d+)(?::(\d+))?", part)
                 if range_match:
                     start, end = int(range_match.group(1)), int(range_match.group(2))
                     stride = int(range_match.group(3)) if range_match.group(3) else 1
@@ -536,17 +669,20 @@ class ChatInterface:
         if msg:
             self._emit(msg)
 
-    @command("bpm", "transport", "set tempo",
-             usage="bpm <N>", hint_args=["<tempo>"])
+    @command("bpm", "transport", "set tempo", usage="bpm <N>", hint_args=["<tempo>"])
     def cmd_bpm(self, args: str):
         self.seq.bpm = float(args)
         self._emit(f"  BPM → {self.seq.bpm}")
 
     # ── Patterns ──────────────────────────────────────────────────────────
 
-    @command("new", "patterns", "create pattern",
-             usage="new <name> [steps] [ch]",
-             hint_args=["<name>", "[steps=16]", "[channel=0]"])
+    @command(
+        "new",
+        "patterns",
+        "create pattern",
+        usage="new <name> [steps] [ch]",
+        hint_args=["<name>", "[steps=16]", "[channel=0]"],
+    )
     def cmd_new(self, args: str):
         parts = args.split()
         name = parts[0]
@@ -563,8 +699,9 @@ class ChatInterface:
             status = "[MUTED]" if p.muted else "[active]"
             self._emit(f"  {p.name:12s} ch={p.channel}  {p.steps} steps  {status}")
 
-    @command("delete", "patterns", "remove a pattern",
-             usage="delete <name>", hint_args=["<pattern>"])
+    @command(
+        "delete", "patterns", "remove a pattern", usage="delete <name>", hint_args=["<pattern>"]
+    )
     def cmd_delete(self, args: str):
         if args in self.seq.patterns:
             del self.seq.patterns[args]
@@ -572,8 +709,13 @@ class ChatInterface:
         else:
             self._emit(f"  Pattern '{args}' not found")
 
-    @command("mute", "patterns", "toggle mute on pattern or note",
-             usage="mute <pattern> [note]", hint_args=["<pattern>", "[note]"])
+    @command(
+        "mute",
+        "patterns",
+        "toggle mute on pattern or note",
+        usage="mute <pattern> [note]",
+        hint_args=["<pattern>", "[note]"],
+    )
     def cmd_mute(self, args: str):
         parts = args.split(None, 1)
         pat_name = parts[0]
@@ -594,10 +736,15 @@ class ChatInterface:
                 pat.muted_notes.add(note)
                 self._emit(f"  ✓ Muted {midi_to_note_name(note)} in '{pat_name}'")
 
-    @command("unmute", "patterns", "unmute pattern or all",
-             usage="unmute [pattern]", hint_args=["[pattern]"])
+    @command(
+        "unmute",
+        "patterns",
+        "unmute pattern or all",
+        usage="unmute [pattern]",
+        hint_args=["[pattern]"],
+    )
     def cmd_unmute(self, args: str):
-        if args == 'all' or not args:
+        if args == "all" or not args:
             for p in self.seq.patterns.values():
                 p.muted = False
                 p.muted_notes.clear()
@@ -610,8 +757,13 @@ class ChatInterface:
         else:
             self._emit(f"  Pattern '{args}' not found")
 
-    @command("solo", "patterns", "solo pattern or note",
-             usage="solo <pattern> [note]", hint_args=["<pattern>", "[note]"])
+    @command(
+        "solo",
+        "patterns",
+        "solo pattern or note",
+        usage="solo <pattern> [note]",
+        hint_args=["<pattern>", "[note]"],
+    )
     def cmd_solo(self, args: str):
         parts = args.split(None, 1)
         pat_name = parts[0]
@@ -620,9 +772,10 @@ class ChatInterface:
             return
         pat = self.seq.patterns[pat_name]
         if len(parts) == 1:
-            already_solo = all(
-                p.muted for n, p in self.seq.patterns.items() if n != pat_name
-            ) and not pat.muted
+            already_solo = (
+                all(p.muted for n, p in self.seq.patterns.items() if n != pat_name)
+                and not pat.muted
+            )
             if already_solo:
                 for p in self.seq.patterns.values():
                     p.muted = False
@@ -646,9 +799,13 @@ class ChatInterface:
 
     # ── Editing ───────────────────────────────────────────────────────────
 
-    @command("put", "editing", "set notes at steps",
-             usage="put <pat> <steps> <notes> [vel] [gate]",
-             hint_args=["<pattern>", "<steps>", "<notes>", "[vel=100]", "[gate=1]"])
+    @command(
+        "put",
+        "editing",
+        "set notes at steps",
+        usage="put <pat> <steps> <notes> [vel] [gate]",
+        hint_args=["<pattern>", "<steps>", "<notes>", "[vel=100]", "[gate=1]"],
+    )
     def cmd_put(self, args: str):
         parts = args.split(None, 4)
         if len(parts) < 3:
@@ -672,9 +829,13 @@ class ChatInterface:
 
         self._emit(f"  ✓ Set {len(steps)} step(s) × {len(notes)} note(s) in '{pat_name}'")
 
-    @command("vel", "editing", "change velocity of existing hits",
-             usage="vel <pat> <steps> <note> <velocity>",
-             hint_args=["<pattern>", "<steps>", "<note>", "<velocity>"])
+    @command(
+        "vel",
+        "editing",
+        "change velocity of existing hits",
+        usage="vel <pat> <steps> <note> <velocity>",
+        hint_args=["<pattern>", "<steps>", "<note>", "<velocity>"],
+    )
     def cmd_vel(self, args: str):
         parts = args.split(None, 3)
         if len(parts) < 4:
@@ -690,16 +851,17 @@ class ChatInterface:
         new_vel = int(vel_str)
         count = 0
         for s in steps:
-            pat.data[s] = [
-                (n, new_vel if n == note else v, g)
-                for n, v, g in pat.data.get(s, [])
-            ]
+            pat.data[s] = [(n, new_vel if n == note else v, g) for n, v, g in pat.data.get(s, [])]
             count += sum(1 for n, _v, _g in pat.data[s] if n == note)
         self._emit(f"  ✓ Set velocity {new_vel} on {count} hit(s)")
 
-    @command("remove", "editing", "remove a note from steps",
-             usage="remove <pat> <steps> <note>",
-             hint_args=["<pattern>", "<steps>", "<note>"])
+    @command(
+        "remove",
+        "editing",
+        "remove a note from steps",
+        usage="remove <pat> <steps> <note>",
+        hint_args=["<pattern>", "<steps>", "<note>"],
+    )
     def cmd_remove(self, args: str):
         parts = args.split(None, 2)
         if len(parts) < 3:
@@ -719,8 +881,13 @@ class ChatInterface:
             count += before - len(pat.data[s])
         self._emit(f"  ✓ Removed {count} hit(s)")
 
-    @command("clear", "editing", "clear steps or entire pattern",
-             usage="clear <pat> [steps]", hint_args=["<pattern>", "[steps]"])
+    @command(
+        "clear",
+        "editing",
+        "clear steps or entire pattern",
+        usage="clear <pat> [steps]",
+        hint_args=["<pattern>", "[steps]"],
+    )
     def cmd_clear(self, args: str):
         parts = args.split()
         pat_name = parts[0]
@@ -736,9 +903,13 @@ class ChatInterface:
             self.seq.patterns[pat_name].clear()
             self._emit(f"  ✓ Cleared all of '{pat_name}'")
 
-    @command("replace", "editing", "replace one note with another",
-             usage="replace <pat> <old_note> <new_note>",
-             hint_args=["<pattern>", "<old_note>", "<new_note>"])
+    @command(
+        "replace",
+        "editing",
+        "replace one note with another",
+        usage="replace <pat> <old_note> <new_note>",
+        hint_args=["<pattern>", "<old_note>", "<new_note>"],
+    )
     def cmd_replace(self, args: str):
         parts = args.split()
         if len(parts) < 3:
@@ -763,16 +934,17 @@ class ChatInterface:
             pat.data[step] = new_entries
         self._emit(f"  ✓ Replaced {count} occurrence(s) in '{pat_name}'")
 
-    @command("show", "editing", "visualize pattern",
-             usage="show <pat>", hint_args=["<pattern>"])
+    @command("show", "editing", "visualize pattern", usage="show <pat>", hint_args=["<pattern>"])
     def cmd_show(self, args: str):
         pat_name = args
         if pat_name not in self.seq.patterns:
             self._emit(f"Pattern '{pat_name}' not found.")
             return
         pat = self.seq.patterns[pat_name]
-        self._emit(f"\n  Pattern: {pat.name}  (ch={pat.channel}, {pat.steps} steps)"
-                   f"  {'[MUTED]' if pat.muted else ''}")
+        self._emit(
+            f"\n  Pattern: {pat.name}  (ch={pat.channel}, {pat.steps} steps)"
+            f"  {'[MUTED]' if pat.muted else ''}"
+        )
         self._emit(f"  {'─' * (pat.steps * 3 + 4)}")
 
         # Collect all notes used
@@ -810,9 +982,13 @@ class ChatInterface:
 
     # ── Generators ────────────────────────────────────────────────────────
 
-    @command("euclid", "generators", "distribute hits evenly (Euclidean rhythm)",
-             usage="euclid <pat> <hits> [notes] [vel]",
-             hint_args=["<pattern>", "<hits>", "[notes]", "[vel]"])
+    @command(
+        "euclid",
+        "generators",
+        "distribute hits evenly (Euclidean rhythm)",
+        usage="euclid <pat> <hits> [notes] [vel]",
+        hint_args=["<pattern>", "<hits>", "[notes]", "[vel]"],
+    )
     def cmd_euclid(self, args: str):
         parts = args.split()
         if len(parts) < 2:
@@ -837,9 +1013,13 @@ class ChatInterface:
 
         self._emit(f"  ✓ Euclidean({hits},{pat.steps}) → steps {steps}")
 
-    @command("arp", "generators", "arpeggiator",
-             usage="arp <pat> <notes> <style>",
-             hint_args=["<pattern>", "<notes>", "<up|down|updown|random>"])
+    @command(
+        "arp",
+        "generators",
+        "arpeggiator",
+        usage="arp <pat> <notes> <style>",
+        hint_args=["<pattern>", "<notes>", "<up|down|updown|random>"],
+    )
     def cmd_arp(self, args: str):
         parts = args.split(None, 2)
         if len(parts) < 3:
@@ -852,16 +1032,17 @@ class ChatInterface:
             return
 
         import random as rnd
+
         pat = self.seq.patterns[pat_name]
         notes = parse_note_list(note_str)
 
-        if style == 'up':
+        if style == "up":
             sequence = notes
-        elif style == 'down':
+        elif style == "down":
             sequence = list(reversed(notes))
-        elif style == 'updown':
+        elif style == "updown":
             sequence = notes + list(reversed(notes[1:-1])) if len(notes) > 2 else notes
-        elif style == 'random':
+        elif style == "random":
             sequence = notes[:]
             rnd.shuffle(sequence)
         else:
@@ -875,9 +1056,13 @@ class ChatInterface:
 
         self._emit(f"  ✓ Arp '{style}' across {pat.steps} steps")
 
-    @command("swing", "generators", "set swing amount",
-             usage="swing <pat> <0-100> [note]",
-             hint_args=["<pattern>", "<0-100>", "[note]"])
+    @command(
+        "swing",
+        "generators",
+        "set swing amount",
+        usage="swing <pat> <0-100> [note]",
+        hint_args=["<pattern>", "<0-100>", "[note]"],
+    )
     def cmd_swing(self, args: str):
         parts = args.split()
         if len(parts) < 2:
@@ -893,23 +1078,23 @@ class ChatInterface:
             note = parse_note_list(parts[2])[0]
             if val == 0:
                 pat.swing_notes.pop(note, None)
-                self._emit(
-                    f"  ✓ {midi_to_note_name(note)} in '{pat_name}' → no swing"
-                )
+                self._emit(f"  ✓ {midi_to_note_name(note)} in '{pat_name}' → no swing")
             else:
                 pat.swing_notes[note] = val
-                self._emit(
-                    f"  ✓ {midi_to_note_name(note)} in '{pat_name}' swing → {val}%"
-                )
+                self._emit(f"  ✓ {midi_to_note_name(note)} in '{pat_name}' swing → {val}%")
         else:
             pat.swing = val
             self._emit(f"  ✓ '{pat_name}' swing → {val}%")
 
     # ── CC Automation ─────────────────────────────────────────────────────
 
-    @command("auto", "cc automation", "CC automation keyframes",
-             usage="auto <pat> cc<N> <step:val ...>",
-             hint_args=["<pattern>", "cc<N>", "<step:val ...>"])
+    @command(
+        "auto",
+        "cc automation",
+        "CC automation keyframes",
+        usage="auto <pat> cc<N> <step:val ...>",
+        hint_args=["<pattern>", "cc<N>", "<step:val ...>"],
+    )
     def cmd_auto(self, args: str):
         parts = args.split()
         if len(parts) < 2:
@@ -927,7 +1112,7 @@ class ChatInterface:
         pat = self.seq.patterns[pat_name]
 
         # auto <pat> list
-        if parts[1] == 'list':
+        if parts[1] == "list":
             if not pat.cc_auto:
                 self._emit(f"  No CC automation on '{pat_name}'")
                 return
@@ -939,7 +1124,7 @@ class ChatInterface:
             return
 
         # Parse cc number from cc<N>
-        cc_match = re.match(r'^cc(\d+)$', parts[1], re.IGNORECASE)
+        cc_match = re.match(r"^cc(\d+)$", parts[1], re.IGNORECASE)
         if not cc_match:
             self._emit(f"  Expected cc<N>, got '{parts[1]}'")
             return
@@ -953,19 +1138,19 @@ class ChatInterface:
             return
 
         # auto <pat> cc<N> clear
-        if parts[2] == 'clear':
+        if parts[2] == "clear":
             pat.cc_auto.pop(cc_num, None)
             pat.cc_interp.pop(cc_num, None)
             self._emit(f"  ✓ Cleared CC{cc_num} automation on '{pat_name}'")
             return
 
         # auto <pat> cc<N> interp <mode>
-        if parts[2] == 'interp':
+        if parts[2] == "interp":
             if len(parts) < 4:
                 self._emit("  Usage: auto <pat> cc<N> interp <linear|step|exp>")
                 return
             mode = parts[3].lower()
-            if mode not in ('linear', 'step', 'exp'):
+            if mode not in ("linear", "step", "exp"):
                 self._emit(f"  Unknown mode '{mode}'. Use: linear, step, exp")
                 return
             pat.cc_interp[cc_num] = mode
@@ -975,7 +1160,7 @@ class ChatInterface:
         # auto <pat> cc<N> <step:val> [step:val ...]
         keyframes = {}
         for token in parts[2:]:
-            kf_match = re.match(r'^(\d+):(\d+)$', token)
+            kf_match = re.match(r"^(\d+):(\d+)$", token)
             if not kf_match:
                 self._emit(f"  Invalid keyframe '{token}', expected step:value")
                 return
@@ -996,22 +1181,30 @@ class ChatInterface:
 
     # ── MIDI ──────────────────────────────────────────────────────────────
 
-    @command("cc", "midi", "send control change",
-             usage="cc <ch> <cc#> <val>",
-             hint_args=["<channel>", "<cc#>", "<value>"])
+    @command(
+        "cc",
+        "midi",
+        "send control change",
+        usage="cc <ch> <cc#> <val>",
+        hint_args=["<channel>", "<cc#>", "<value>"],
+    )
     def cmd_cc(self, args: str):
         parts = args.split()
         ch, cc, val = int(parts[0]), int(parts[1]), int(parts[2])
-        self.seq._send(mido.Message('control_change', channel=ch, control=cc, value=val))
+        self.seq._send(mido.Message("control_change", channel=ch, control=cc, value=val))
         self._emit(f"  ✓ CC {cc}={val} on ch {ch}")
 
-    @command("pc", "midi", "send program change",
-             usage="pc <ch> <program>",
-             hint_args=["<channel>", "<program>"])
+    @command(
+        "pc",
+        "midi",
+        "send program change",
+        usage="pc <ch> <program>",
+        hint_args=["<channel>", "<program>"],
+    )
     def cmd_pc(self, args: str):
         parts = args.split()
         ch, prog = int(parts[0]), int(parts[1])
-        self.seq._send(mido.Message('program_change', channel=ch, program=prog))
+        self.seq._send(mido.Message("program_change", channel=ch, program=prog))
         self._emit(f"  ✓ Program {prog} on ch {ch}")
 
     @command("panic", "midi", "all notes off")
@@ -1025,9 +1218,13 @@ class ChatInterface:
         for p in mido.get_output_names():
             self._emit(f"    {p}")
 
-    @command("tap", "midi", "play a single note",
-             usage="tap <note> [vel] [ch]",
-             hint_args=["<note>", "[vel=100]", "[ch=0]"])
+    @command(
+        "tap",
+        "midi",
+        "play a single note",
+        usage="tap <note> [vel] [ch]",
+        hint_args=["<note>", "[vel=100]", "[ch=0]"],
+    )
     def cmd_tap(self, args: str):
         parts = args.split()
         if not parts:
@@ -1036,13 +1233,200 @@ class ChatInterface:
         note = parse_note_list(parts[0])[0]
         vel = int(parts[1]) if len(parts) > 1 else 100
         ch = int(parts[2]) if len(parts) > 2 else 0
-        self.seq._send(mido.Message('note_on', note=note, channel=ch, velocity=vel))
+        self.seq._send(mido.Message("note_on", note=note, channel=ch, velocity=vel))
         threading.Timer(
             0.3,
             self.seq._send,
-            args=(mido.Message('note_off', note=note, channel=ch, velocity=0),),
+            args=(mido.Message("note_off", note=note, channel=ch, velocity=0),),
         ).start()
         self._emit(f"  ✓ {midi_to_note_name(note)} v{vel} ch{ch}")
+
+    # ── Macros ────────────────────────────────────────────────────────────
+
+    @command(
+        "macro",
+        "other",
+        "define/manage reusable command sequences",
+        usage="macro <def|import|list|show|delete|global|local|edit> ...",
+        hint_args=["<subcommand>", "..."],
+    )
+    def cmd_macro(self, args: str):
+        if not args:
+            self._emit("Usage: macro <def|import|list|show|delete|global|local|edit> ...")
+            return
+
+        sub, _, rest = args.partition(" ")
+        sub = sub.lower()
+        rest = rest.strip()
+
+        if sub == "def":
+            self._macro_def(rest)
+        elif sub == "import":
+            self._macro_import(rest)
+        elif sub == "list":
+            self._macro_list()
+        elif sub == "show":
+            self._macro_show(rest)
+        elif sub == "delete":
+            self._macro_delete(rest)
+        elif sub == "global":
+            self._macro_global(rest)
+        elif sub == "local":
+            self._macro_local(rest)
+        elif sub == "edit":
+            self._macro_edit(rest)
+        else:
+            self._emit(f"  Unknown macro subcommand: {sub}")
+
+    def _macro_def(self, rest: str):
+        """macro def <name> cmd1; cmd2; cmd3"""
+        if not rest:
+            self._emit("Usage: macro def <name> cmd1; cmd2; cmd3")
+            return
+        name, _, cmd_str = rest.partition(" ")
+        if not cmd_str:
+            self._emit("Usage: macro def <name> cmd1; cmd2; cmd3")
+            return
+        if name in self._commands:
+            self._emit(f"  '{name}' is a built-in command, choose another name")
+            return
+        commands = [c.strip() for c in cmd_str.split(";") if c.strip()]
+        params = self._extract_params(commands)
+        self._macros[name] = Macro(
+            name=name,
+            commands=commands,
+            params=params,
+            scope="project",
+        )
+        param_info = f" (params: {', '.join(params)})" if params else ""
+        self._emit(f"  ✓ Defined macro '{name}' ({len(commands)} commands){param_info}")
+
+    def _macro_import(self, rest: str):
+        """macro import <name> <file.txt>"""
+        parts = rest.split(None, 1)
+        if len(parts) < 2:
+            self._emit("Usage: macro import <name> <file.txt>")
+            return
+        name, filepath = parts
+        if name in self._commands:
+            self._emit(f"  '{name}' is a built-in command, choose another name")
+            return
+        path = Path(filepath)
+        if not path.exists():
+            self._emit(f"  File not found: {filepath}")
+            return
+        commands = [
+            line.strip()
+            for line in path.read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        if not commands:
+            self._emit(f"  No commands found in {filepath}")
+            return
+        params = self._extract_params(commands)
+        self._macros[name] = Macro(
+            name=name,
+            commands=commands,
+            params=params,
+            scope="project",
+        )
+        param_info = f" (params: {', '.join(params)})" if params else ""
+        self._emit(f"  ✓ Imported macro '{name}' ({len(commands)} commands){param_info}")
+
+    def _macro_list(self):
+        """macro list"""
+        if not self._macros:
+            self._emit("  No macros defined. Use: macro def <name> cmd1; cmd2")
+            return
+        for macro in self._macros.values():
+            params = ", ".join(macro.params) if macro.params else "none"
+            desc = f"  {macro.description}" if macro.description else ""
+            self._emit(f"  {macro.name:16s} [{macro.scope:7s}]  params: {params}{desc}")
+
+    def _macro_show(self, name: str):
+        """macro show <name>"""
+        if not name:
+            self._emit("Usage: macro show <name>")
+            return
+        macro = self._macros.get(name)
+        if not macro:
+            self._emit(f"  Macro '{name}' not found")
+            return
+        self._emit(f"  Macro: {macro.name}  [{macro.scope}]")
+        if macro.description:
+            self._emit(f"  Description: {macro.description}")
+        if macro.params:
+            self._emit(f"  Params: {', '.join(macro.params)}")
+        self._emit("  Commands:")
+        for i, cmd in enumerate(macro.commands, 1):
+            self._emit(f"    {i}. {cmd}")
+
+    def _macro_delete(self, name: str):
+        """macro delete <name>"""
+        if not name:
+            self._emit("Usage: macro delete <name>")
+            return
+        macro = self._macros.pop(name, None)
+        if not macro:
+            self._emit(f"  Macro '{name}' not found")
+            return
+        if macro.scope == "global":
+            self._delete_global_macro(name)
+        self._emit(f"  ✓ Deleted macro '{name}'")
+
+    def _macro_global(self, name: str):
+        """macro global <name> — promote project macro to global"""
+        if not name:
+            self._emit("Usage: macro global <name>")
+            return
+        macro = self._macros.get(name)
+        if not macro:
+            self._emit(f"  Macro '{name}' not found")
+            return
+        macro.scope = "global"
+        self._save_global_macro(macro)
+        self._emit(f"  ✓ Macro '{name}' saved to global macros/")
+
+    def _macro_local(self, name: str):
+        """macro local <name> — copy global macro to project scope"""
+        if not name:
+            self._emit("Usage: macro local <name>")
+            return
+        macro = self._macros.get(name)
+        if not macro:
+            self._emit(f"  Macro '{name}' not found")
+            return
+        macro.scope = "project"
+        self._emit(f"  ✓ Macro '{name}' is now project-scoped")
+
+    def _macro_edit(self, name: str):
+        """macro edit <name> — open editor in browser"""
+        if not name:
+            self._emit("Usage: macro edit <name>")
+            return
+        macro = self._macros.get(name)
+        if macro:
+            self.seq._notify(
+                {
+                    "type": "ui",
+                    "macro_edit": name,
+                    "commands": macro.commands,
+                    "params": macro.params,
+                }
+            )
+        else:
+            # New macro — open empty editor
+            self.seq._notify(
+                {
+                    "type": "ui",
+                    "macro_edit": name,
+                    "commands": [],
+                    "params": [],
+                }
+            )
+        self._emit(f"  Opening editor for macro '{name}'")
+
+    # ── Plugins ───────────────────────────────────────────────────────────
 
     # ── Other ─────────────────────────────────────────────────────────────
 
@@ -1052,21 +1436,36 @@ class ChatInterface:
         for name, note in sorted(DRUM_MAP.items(), key=lambda x: x[1]):
             self._emit(f"    {name:10s} → {note} ({midi_to_note_name(note)})")
 
-    @command("drummap", "other", "edit drum name mappings",
-             usage="drummap <name> <note> | reset",
-             hint_args=["<name>", "<note>", "| reset"])
+    @command(
+        "drummap",
+        "other",
+        "edit drum name mappings",
+        usage="drummap <name> <note> | reset",
+        hint_args=["<name>", "<note>", "| reset"],
+    )
     def cmd_drummap(self, args: str):
         parts = args.split()
         if len(parts) == 0:
             self._emit("Usage: drummap <name> <note>  or  drummap reset")
             return
-        if parts[0] == 'reset':
+        if parts[0] == "reset":
             DRUM_MAP.clear()
-            DRUM_MAP.update({
-                'kick': 36, 'snare': 38, 'clap': 39, 'hihat': 42,
-                'ohh': 46, 'tom1': 48, 'tom2': 45, 'tom3': 43,
-                'crash': 49, 'ride': 51, 'cowbell': 56, 'rimshot': 37,
-            })
+            DRUM_MAP.update(
+                {
+                    "kick": 36,
+                    "snare": 38,
+                    "clap": 39,
+                    "hihat": 42,
+                    "ohh": 46,
+                    "tom1": 48,
+                    "tom2": 45,
+                    "tom3": 43,
+                    "crash": 49,
+                    "ride": 51,
+                    "cowbell": 56,
+                    "rimshot": 37,
+                }
+            )
             self._emit("  ✓ Drum map reset to GM defaults")
         elif len(parts) == 1:
             name = parts[0].lower()
@@ -1084,28 +1483,43 @@ class ChatInterface:
             DRUM_MAP[name] = note
             self._emit(f"  ✓ {name} → {note} ({midi_to_note_name(note)})")
 
-    @command("save", "other", "save session",
-             usage="save [file]", hint_args=["[file.json]"])
+    @command("save", "other", "save session", usage="save [file]", hint_args=["[file.json]"])
     def cmd_save(self, args: str):
-        filepath = args if args else 'session.json'
+        filepath = args if args else "session.json"
         path = self.seq.save(filepath)
+        # Append project macros to saved file
+        project_macros = {n: m.to_dict() for n, m in self._macros.items() if m.scope == "project"}
+        if project_macros:
+            with open(path) as f:
+                data = json.load(f)
+            data["macros"] = project_macros
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2)
         self._emit(f"  ✓ Saved to {path}")
 
-    @command("load", "other", "load session from file",
-             usage="load <file>", hint_args=["<file.json>"])
+    @command(
+        "load", "other", "load session from file", usage="load <file>", hint_args=["<file.json>"]
+    )
     def cmd_load(self, args: str):
         if not args:
             self._emit("Usage: load <file.json>  (use 'run' for command scripts)")
             return
-        if not args.endswith('.json'):
+        if not args.endswith(".json"):
             self._emit("  load expects a .json session file. Did you mean: run " + args)
             return
         path = self.seq.load(args)
+        # Restore project macros from session
+        with open(args) as f:
+            data = json.load(f)
+        if "macros" in data:
+            for name, mdata in data["macros"].items():
+                macro = Macro.from_dict(mdata)
+                macro.scope = "project"
+                self._macros[name] = macro
         n_pat = len(self.seq.patterns)
         self._emit(f"  ✓ Loaded from {path} ({n_pat} patterns, {self.seq.bpm} BPM)")
 
-    @command("run", "other", "run a command script",
-             usage="run <file>", hint_args=["<file.txt>"])
+    @command("run", "other", "run a command script", usage="run <file>", hint_args=["<file.txt>"])
     def cmd_run(self, args: str):
         if not args:
             self._emit("Usage: run <file.txt>")
@@ -1117,7 +1531,7 @@ class ChatInterface:
         count = 0
         for line in path.read_text().splitlines():
             line = line.strip()
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
             self._emit(f"  > {line}")
             _, out = self.handle(line)
@@ -1125,8 +1539,9 @@ class ChatInterface:
             count += 1
         self._emit(f"  ✓ Ran {count} commands from {path}")
 
-    @command("fold", "other", "collapse pattern display",
-             usage="fold <pattern>", hint_args=["<pattern>"])
+    @command(
+        "fold", "other", "collapse pattern display", usage="fold <pattern>", hint_args=["<pattern>"]
+    )
     def cmd_fold(self, args: str):
         if not args:
             self._emit("Usage: fold <pattern>")
@@ -1136,8 +1551,13 @@ class ChatInterface:
             return
         self.seq._notify({"type": "ui", "fold": args})
 
-    @command("unfold", "other", "expand pattern display",
-             usage="unfold <pattern>", hint_args=["<pattern>"])
+    @command(
+        "unfold",
+        "other",
+        "expand pattern display",
+        usage="unfold <pattern>",
+        hint_args=["<pattern>"],
+    )
     def cmd_unfold(self, args: str):
         if not args:
             self._emit("Usage: unfold <pattern>")
@@ -1171,6 +1591,14 @@ class ChatInterface:
                 name = c.usage if c.usage else c.name
                 aliases = f" (alias: {', '.join(c.aliases)})" if c.aliases else ""
                 self._emit(f"    {name:36s} {c.description}{aliases}")
+        # Show loaded macros
+        if self._macros:
+            self._emit("\n  MACROS")
+            for macro in self._macros.values():
+                params = " ".join(f"{p}=<val>" for p in macro.params)
+                usage = f"{macro.name} {params}" if params else macro.name
+                desc = macro.description or f"[{macro.scope}] {len(macro.commands)} commands"
+                self._emit(f"    {usage:36s} {desc}")
         self._emit("")
 
     @command("quit", "other", "shutdown", aliases=["exit"])
@@ -1187,18 +1615,20 @@ class ChatInterface:
         if not line:
             return True, []
 
-        cmd, _, args = line.partition(' ')
+        cmd, _, args = line.partition(" ")
         cmd = cmd.lower()
         args = args.strip()
 
         try:
             cmd_def = self._commands.get(cmd)
-            if cmd_def is None:
-                self._emit(f"  Unknown command: {cmd}. Type 'help' for commands.")
-            else:
+            if cmd_def is not None:
                 result = getattr(self, cmd_def.handler)(args)
                 if result is False:
                     return False, self._output
+            elif cmd in self._macros:
+                self._run_macro(self._macros[cmd], args)
+            else:
+                self._emit(f"  Unknown command: {cmd}. Type 'help' for commands.")
             self._notify_state()
         except Exception as e:
             self._emit(f"  Error: {e}")
@@ -1226,5 +1656,5 @@ class ChatInterface:
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     ChatInterface().run()
