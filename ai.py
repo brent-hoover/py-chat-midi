@@ -23,6 +23,7 @@ _AI_EXCLUDED_COMMANDS = {
     "undo",
     "redo",
     "history",
+    "reset"
 }
 
 
